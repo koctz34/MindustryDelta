@@ -60,9 +60,24 @@ public class MenuFragment{
             }).grow();
         });
 
-        parent.fill(c -> c.bottom().right().button(Icon.discord, new ImageButtonStyle(){{
-            up = discordBanner;
-        }}, ui.discord::show).visible(() -> !ui.consolefrag.shown()).marginTop(9f).marginLeft(10f).tooltip("@discord").size(84, 45).name("discord"));
+        parent.fill(c -> {
+            c.touchable = Touchable.disabled;
+            c.bottom().right();
+
+            var sticker = new Table(Tex.whiteui);
+            sticker.touchable = Touchable.disabled;
+            sticker.setColor(Color.white);
+            sticker.setTransform(true);
+            sticker.setOrigin(Align.center);
+            sticker.setRotation(45f);
+
+            var label = new Label("- DELTA -");
+            label.setColor(Color.black);
+            label.setAlignment(Align.center);
+
+            sticker.add(label);
+            c.add(sticker);
+        });
 
         //info icon
         if(mobile){
