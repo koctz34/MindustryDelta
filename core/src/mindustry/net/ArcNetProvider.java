@@ -27,6 +27,18 @@ import java.util.concurrent.*;
 import static mindustry.Vars.*;
 
 public class ArcNetProvider implements NetProvider{
+    /**
+     * Max serialized size of one TCP {@link Packet} (see {@link PacketSerializer}: length is u16, cap 65535).
+     * Default Arc was 16384, which kicks players sending large {@code delta-canvas} / truecolor payloads
+     * (e.g. {@code canvasSize} 82 → ~27 KiB RGBA + type string).
+     */
+    private static final int netObjectBufferBytes = 65536;
+    /**
+     * Working buffer for (de)compressing one packet body in {@link PacketSerializer}; must be ≥ largest
+     * uncompressed inner length (same u16 cap as wire format).
+     */
+    private static final int netPacketScratchBytes = 65536;
+    
     final Client client;
     final Prov<DatagramPacket> packetSupplier = () -> new DatagramPacket(new byte[512], 512);
 
@@ -58,7 +70,7 @@ public class ArcNetProvider implements NetProvider{
             packetSpamLimit = Config.packetSpamLimit.num();
         });
 
-        client = new Client(8192, 16384, new PacketSerializer()){
+        client = new Client(netObjectBufferBytes, netObjectBufferBytes, new PacketSerializer()){
             @Override
             public void handleNetException(ArcNetException e){
                 //allow occasional UDP network errors
@@ -106,7 +118,7 @@ public class ArcNetProvider implements NetProvider{
             }
         });
 
-        server = new Server(32768, 16384, new PacketSerializer());
+        server = new Server(netObjectBufferBytes, netObjectBufferBytes, new PacketSerializer());
         server.setMulticast(multicastGroup, multicastPort);
         server.setDiscoveryHandler((address, handler) -> {
             ByteBuffer buffer = NetworkIO.writeServerData();
@@ -422,7 +434,7 @@ public class ArcNetProvider implements NetProvider{
         //for debugging total read/write speeds
         private static final boolean debug = false;
 
-        ThreadLocal<ByteBuffer> decompressBuffer = Threads.local(() -> ByteBuffer.allocate(32768));
+        ThreadLocal<ByteBuffer> decompressBuffer = Threads.local(() -> ByteBuffer.allocate(netPacketScratchBytes));
         ThreadLocal<Reads> reads = Threads.local(() -> new Reads(new ByteBufferInput(decompressBuffer.get())));
         ThreadLocal<Writes> writes = Threads.local(() -> new Writes(new ByteBufferOutput(decompressBuffer.get())));
 
