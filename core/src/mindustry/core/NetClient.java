@@ -121,6 +121,28 @@ public class NetClient implements ApplicationListener{
             net.send(c, true);
         });
 
+        // DELTA-only truecolor canvas updates come via vanilla binary packet channel.
+        addBinaryPacketHandler("delta-canvas-true", contents -> {
+            try{
+                var read = new arc.util.io.Reads(new java.io.DataInputStream(new java.io.ByteArrayInputStream(contents)));
+                int pos = read.i();
+                int len = read.i();
+                if(len < 0 || len > 1024 * 1024 * 8) return;
+                byte[] rgba = read.b(len);
+
+                var build = world.build(pos);
+                if(build instanceof mindustry.world.blocks.logic.CanvasBlock.CanvasBuild canvas){
+                    var block = (mindustry.world.blocks.logic.CanvasBlock)canvas.block;
+                    int expected = block.canvasSize * block.canvasSize * 4;
+                    if(block.trueColor && rgba.length == expected){
+                        canvas.applyTrueColor(rgba);
+                    }
+                }
+            }catch(Throwable ignored){
+                // ignore malformed payloads
+            }
+        });
+
         net.handleClient(Disconnect.class, packet -> {
             if(quietReset) return;
 
@@ -634,6 +656,9 @@ public class NetClient implements ApplicationListener{
         ui.join.hide();
         net.setClientLoaded(true);
         Core.app.post(Call::connectConfirm);
+        // DELTA handshake: mark this client as supporting truecolor canvas sync on the server.
+        // Uses vanilla binary packet channel to avoid changing packet IDs.
+        Call.serverBinaryPacketReliable("delta-hello", new byte[]{1});
         Time.runTask(40f, platform::updateRPC);
         Core.app.post(ui.loadfrag::hide);
         lastSnapshotTimestamp = Time.millis();
