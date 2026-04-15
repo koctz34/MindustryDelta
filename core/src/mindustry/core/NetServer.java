@@ -145,6 +145,74 @@ public class NetServer implements ApplicationListener{
             }
         });
 
+        // DELTA handshake: client announces it supports DELTA extensions.
+        addBinaryPacketHandler("delta-hello", (player, contents) -> {
+            if(player != null && player.con != null){
+                player.con.deltaClient = true;
+            }
+        });
+
+        // DELTA-only: accept truecolor canvas updates via vanilla binary packet channel.
+        addBinaryPacketHandler("delta-canvas", (player, contents) -> {
+            try{
+                // Any client sending "delta-canvas" is by definition a delta client.
+                // Mark it NOW so the broadcast below never sends legacy back to the sender.
+                if(player != null && player.con != null){
+                    player.con.deltaClient = true;
+                }
+
+                var read = new Reads(new DataInputStream(new ByteArrayInputStream(contents)));
+                int pos = read.i();
+                int len = read.i();
+                if(len < 0 || len > 1024 * 1024 * 8) return;
+                byte[] rgba = read.b(len);
+
+                var build = world.build(pos);
+                if(!(build instanceof mindustry.world.blocks.logic.CanvasBlock.CanvasBuild canvas)) return;
+
+                // validate permissions server-side
+                if(!mindustry.entities.Units.canInteract(player, build) ||
+                !netServer.admins.allowAction(player, ActionType.configure, build.tile, action -> action.config = null)){
+                    throw new ValidateException(player, "Player cannot configure a tile.");
+                }
+
+                var block = (mindustry.world.blocks.logic.CanvasBlock)canvas.block;
+                int expected = block.canvasSize * block.canvasSize * 4;
+                if(!block.trueColor || rgba.length != expected) return;
+
+                // apply full truecolor to server state
+                canvas.applyTrueColor(rgba);
+
+                // broadcast vanilla-safe legacy indexed config to clients WITHOUT DELTA support.
+                // DELTA clients receive truecolor below; sending legacy to them would overwrite their truecolor buffer.
+                byte[] legacy = canvas.legacyBytesPublic();
+                var legacyPacket = new TileConfigCallPacket();
+                legacyPacket.player = null;
+                legacyPacket.build = build;
+                legacyPacket.value = legacy;
+                for(Player other : Groups.player){
+                    if(other.con != null && !other.con.deltaClient){
+                        other.con.send(legacyPacket, true);
+                    }
+                }
+
+                // broadcast truecolor only to modded clients (still via vanilla packet channel)
+                var out = new ReusableByteOutStream();
+                var writes = new Writes(new DataOutputStream(out));
+                writes.i(pos);
+                writes.i(rgba.length);
+                writes.b(rgba);
+                byte[] payload = out.toByteArray();
+                for(Player other : Groups.player){
+                    if(other.con != null && other.con.deltaClient){
+                        Call.clientBinaryPacketReliable(other.con, "delta-canvas-true", payload);
+                    }
+                }
+            }catch(Throwable ignored){
+                // ignore malformed payloads
+            }
+        });
+
         net.handleServer(ConnectPacket.class, (con, packet) -> {
             if(con.kicked) return;
 
