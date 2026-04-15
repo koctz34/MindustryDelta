@@ -37,7 +37,7 @@ import static mindustry.Vars.*;
 @SuppressWarnings("unused")
 @TypeIOHandler
 public class TypeIO{
-    private static final int maxArraySize = 1000, maxByteArraySize = 40_000;
+    private static final int maxArraySize = 1000000, maxByteArraySize = 1000_0000;
 
     public static void writeObject(Writes write, Object object){
         if(object == null){
@@ -175,7 +175,7 @@ public class TypeIO{
 
     public static @Nullable Object readObject(Reads read, boolean box, @Nullable ContentMapper mapper, boolean safe, boolean allowArrays){
         //use a much lower array size limit for build plans
-        int maxArraySize = safe ? TypeIO.maxArraySize : 200;
+        int maxArraySize = safe ? TypeIO.maxArraySize : 2000000;
 
         byte type = read.b();
         return switch(type){
@@ -187,7 +187,7 @@ public class TypeIO{
                 byte exists = read.b();
                 if(exists != 0){
                     //in a safe context, strings can only be 1000 chars
-                    yield read.str(safe ? 1000 : 0);
+                    yield read.str(safe ? 10000000 : 0);
                 }else{
                     yield null;
                 }
