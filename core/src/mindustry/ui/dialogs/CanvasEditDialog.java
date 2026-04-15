@@ -9,6 +9,7 @@ import arc.math.*;
 import arc.math.geom.*;
 import arc.scene.*;
 import arc.scene.event.*;
+import arc.scene.ui.*;
 import arc.scene.ui.layout.*;
 import arc.struct.*;
 import arc.util.*;
@@ -30,6 +31,12 @@ public class CanvasEditDialog extends BaseDialog{
     CanvasBlock block;
     Pixmap pix;
     Texture texture;
+    Color current = new Color();
+    TextField hexField;
+    Slider rSlider, gSlider, bSlider, aSlider, brushSlider;
+    int brush = 1;
+    /** Prevents RGBA slider {@code moved()} from mixing stale channel values when sliders are set programmatically. */
+    boolean syncingColorUi;
 
     public CanvasEditDialog(CanvasBuild canvas){
         super("");
@@ -40,6 +47,7 @@ public class CanvasEditDialog extends BaseDialog{
         pix = block.makePixmap(canvas.data, new Pixmap(size, size));
         texture = new Texture(pix);
         curColor = block.palette[0];
+        current.set(curColor);
 
         addCloseButton(160f);
 
@@ -71,7 +79,10 @@ public class CanvasEditDialog extends BaseDialog{
         });
 
         cont.table(Tex.pane, body -> {
-            body.add(new Element(){
+            body.center();
+
+            //canvas element centered; tools panel is separate
+            var canvasElement = new Element(){
                 int lastX, lastY;
                 IntSeq stack = new IntSeq();
 
@@ -101,10 +112,10 @@ public class CanvasEditDialog extends BaseDialog{
                                         while(!stack.isEmpty()){
                                             int current = stack.pop();
                                             int x = Point2.x(current), y = Point2.y(current);
-                                            draw(x, y);
+                                            drawBrush(x, y);
                                             for(int i = 0; i < 4; i++){
                                                 int nx = x + Geometry.d4x(i), ny = y + Geometry.d4y(i);
-                                                if(nx >= 0 && ny >= 0 && nx < pix.width && ny < pix.height && pix.getRaw(nx, ny) == dst){
+                                                if(nx >= 0 && ny >= 0 && nx < pix.width && ny < pix.height && pix.get(nx, ny) == dst){
                                                     stack.add(Point2.pack(nx, ny));
                                                 }
                                             }
@@ -113,12 +124,12 @@ public class CanvasEditDialog extends BaseDialog{
 
                                     return false;
                                 }else{
-                                    draw(cx, cy);
+                                    drawBrush(cx, cy);
                                     lastX = cx;
                                     lastY = cy;
                                 }
                             }else if(button == KeyCode.mouseMiddle){
-                                curColor = pix.get(cx, cy);
+                                CanvasEditDialog.this.setColor(pix.get(cx, cy));
                                 return false;
                             }
                             return true;
@@ -128,18 +139,26 @@ public class CanvasEditDialog extends BaseDialog{
                         public void touchDragged(InputEvent event, float ex, float ey, int pointer){
                             if(fill) return;
                             int cx = convertX(ex), cy = convertY(ey);
-                            Bresenham2.line(lastX, lastY, cx, cy, (x, y) -> draw(x, y));
+                            Bresenham2.line(lastX, lastY, cx, cy, (x, y) -> drawBrush(x, y));
                             lastX = cx;
                             lastY = cy;
                         }
                     });
                 }
 
-                void draw(int x, int y){
-                    if(pix.in(x, y) && pix.get(x, y) != curColor){
-                        pix.set(x, y, curColor);
-                        Pixmaps.drawPixel(texture, x, y, curColor);
-                        modified = true;
+                void drawBrush(int x, int y){
+                    int radius = Math.max(0, brush - 1);
+                    int rr = radius * radius;
+                    for(int dx = -radius; dx <= radius; dx++){
+                        for(int dy = -radius; dy <= radius; dy++){
+                            if(dx*dx + dy*dy > rr) continue;
+                            int px = x + dx, py = y + dy;
+                            if(pix.in(px, py) && pix.get(px, py) != curColor){
+                                pix.set(px, py, curColor);
+                                Pixmaps.drawPixel(texture, px, py, curColor);
+                                modified = true;
+                            }
+                        }
                     }
                 }
 
@@ -182,7 +201,91 @@ public class CanvasEditDialog extends BaseDialog{
                         }
                     }
                 }
-            }).size(mobile && !Core.graphics.isPortrait() ? Math.min(290f, Core.graphics.getHeight() / Scl.scl(1f) - 75f / Scl.scl(1f)) : 480f);
+            };
+
+            float canvasPx = mobile && !Core.graphics.isPortrait() ? Math.min(290f, Core.graphics.getHeight() / Scl.scl(1f) - 75f / Scl.scl(1f)) : 480f;
+            body.add(canvasElement).size(canvasPx);
+            body.add().width(8f);
+
+            body.table(Tex.button, right -> {
+                right.defaults().left().pad(6f);
+
+                //color preview circle (clickable)
+                var preview = new Element(){
+                    @Override
+                    public void draw(){
+                        Draw.alpha(parentAlpha);
+                        //alpha background
+                        Tex.alphaBg.draw(x, y, width, height);
+                        //circle fill
+                        Draw.color(current);
+                        Fill.circle(x + width/2f, y + height/2f, Math.min(width, height)/2f - 2f);
+                        Draw.reset();
+                    }
+                };
+
+                preview.touchable = Touchable.enabled;
+                preview.clicked(() -> ui.picker.show(Tmp.c1.set(current), true, c -> setColor(c.rgba8888())));
+
+                var pick = new Table();
+                pick.add(preview).size(44f);
+                right.add(pick).row();
+
+                //hex
+                right.add("@color").padRight(6f);
+                hexField = right.field(current.toString(), value -> {
+                    if(syncingColorUi) return;
+                    try{
+                        Color.valueOf(current, value);
+                        setColor(current.rgba8888(), false);
+                    }catch(Exception ignored){
+                    }
+                }).width(180f).valid(text -> {
+                    try{
+                        Color.valueOf(text);
+                        return true;
+                    }catch(Exception e){
+                        return false;
+                    }
+                }).get();
+                right.row();
+
+                right.button("@pickcolor", Icon.pencil, () -> ui.picker.show(Tmp.c1.set(current), true, c -> setColor(c.rgba8888()))).colspan(2).growX();
+                right.row();
+
+                //RGBA sliders
+                right.add("R").padRight(6f);
+                right.add(rSlider = new Slider(0f, 1f, 1f/255f, false)).width(220f).row();
+                right.add("G").padRight(6f);
+                right.add(gSlider = new Slider(0f, 1f, 1f/255f, false)).width(220f).row();
+                right.add("B").padRight(6f);
+                right.add(bSlider = new Slider(0f, 1f, 1f/255f, false)).width(220f).row();
+                right.add("A").padRight(6f);
+                right.add(aSlider = new Slider(0f, 1f, 1f/255f, false)).width(220f).row();
+
+                //brush
+                right.add("@canvas.brushsize").padRight(6f);
+                right.add(brushSlider = new Slider(1f, 8f, 1f, false)).width(220f).row();
+
+                //init slider values + listeners
+                rSlider.setValue(current.r);
+                gSlider.setValue(current.g);
+                bSlider.setValue(current.b);
+                aSlider.setValue(current.a);
+                brushSlider.setValue(brush);
+
+                Runnable updateFromSliders = () -> {
+                    if(syncingColorUi) return;
+                    current.set(rSlider.getValue(), gSlider.getValue(), bSlider.getValue(), aSlider.getValue());
+                    setColor(current.rgba8888());
+                };
+
+                rSlider.moved(v -> updateFromSliders.run());
+                gSlider.moved(v -> updateFromSliders.run());
+                bSlider.moved(v -> updateFromSliders.run());
+                aSlider.moved(v -> updateFromSliders.run());
+                brushSlider.moved(v -> brush = (int)v);
+            }).growY().width(320f);
         }).colspan(3);
 
         cont.row();
@@ -191,17 +294,18 @@ public class CanvasEditDialog extends BaseDialog{
             t.button(Icon.grid, Styles.clearNoneTogglei, () -> grid = !grid).checked(grid).size(44f);
         });
 
+        // Vanilla-style palette: Tex.whiteui + squareTogglei + imageUpColor (same as stock Canvas UI).
         cont.table(Tex.button, p -> {
             for(int i = 0; i < block.palette.length; i++){
                 int fi = i;
 
-                if(i % 8 == 0){
+                if(i % 12 == 0){
                     p.row();
                 }
 
-                var button = p.button(Tex.whiteui, Styles.squareTogglei, 30, () -> {
-                    curColor = block.palette[fi];
-                }).size(44).checked(b -> curColor == block.palette[fi]).get();
+                ImageButton button = p.button(Tex.whiteui, Styles.squareTogglei, 30f, () -> {
+                    setColor(block.palette[fi]);
+                }).size(44f).checked(b -> curColor == block.palette[fi]).get();
                 button.getStyle().imageUpColor = new Color(block.palette[i]);
             }
         });
@@ -241,8 +345,7 @@ public class CanvasEditDialog extends BaseDialog{
             int sizeX = Math.min(source.width, pix.width), sizeY = Math.min(source.height, pix.height);
             for(int x = 0; x < sizeX; x++){
                 for(int y = 0; y < sizeY; y++){
-                    int c = source.getRaw(x, y);
-                    pix.setRaw(x, y, findClosest(c));
+                    pix.setRaw(x, y, source.getRaw(x, y));
                 }
             }
 
@@ -253,29 +356,89 @@ public class CanvasEditDialog extends BaseDialog{
         }
     }
 
-    int findClosest(int color){
-        //blend the new color over the bg color for more accurate selection
-        if(Color.ai(color) < 255){
-            color = Pixmap.blend(block.palette[0], color);
-        }
-        Tmp.c1.set(color);
-        float nearestDst = 100f;
-        int nearest = 0;
-        for(int i = 0; i < block.palette.length; i++){
-            if(block.palette[i] == color) return color;
-            Tmp.c2.set(block.palette[i]);
-            float dst = Tmp.c1.dst(Tmp.c2);
-            if(dst < nearestDst){
-                nearest = i;
-                nearestDst = dst;
+    void setColor(int rgba){
+        setColor(rgba, true);
+    }
+
+    void setColor(int rgba, boolean updateSliders){
+        curColor = rgba;
+        current.set(rgba);
+
+        if(updateSliders && rSlider != null){
+            syncingColorUi = true;
+            try{
+                rSlider.setValue(current.r);
+                gSlider.setValue(current.g);
+                bSlider.setValue(current.b);
+                aSlider.setValue(current.a);
+            }finally{
+                syncingColorUi = false;
             }
         }
-        return block.palette[nearest];
+
+        if(hexField != null){
+            String val = current.toString();
+            if(current.a >= 0.9999f){
+                val = val.substring(0, 6);
+            }
+            if(!hexField.hasKeyboard()){
+                syncingColorUi = true;
+                try{
+                    hexField.setText(val);
+                }finally{
+                    syncingColorUi = false;
+                }
+            }
+        }
     }
 
     void save(){
         if(modified && canvas.isValid()){
-            canvas.configure(canvas.packPixmap(pix));
+            byte[] rgba = canvas.packPixmap(pix);
+
+            // Multiplayer-safe path:
+            // - send full truecolor to server via existing vanilla binary packet channel
+            // - server re-broadcasts legacy to vanilla clients + truecolor to modded clients (also via binary channel)
+            if(net.client()){
+                // Apply locally right away so the user never sees a palette-quantized flash
+                // while waiting for the server echo ("delta-canvas-true").
+                canvas.applyTrueColor(rgba);
+
+                var stream = new arc.util.io.ReusableByteOutStream();
+                var writes = new arc.util.io.Writes(new java.io.DataOutputStream(stream));
+                writes.i(canvas.pos());
+                writes.i(rgba.length);
+                writes.b(rgba);
+                Call.serverBinaryPacketReliable("delta-canvas", stream.toByteArray());
+            }else if(net.server()){
+                // Host is editing – apply locally and split broadcast: legacy for vanilla, truecolor for delta.
+                canvas.applyTrueColor(rgba);
+
+                byte[] legacy = canvas.legacyBytesPublic();
+                var legacyPacket = new mindustry.gen.TileConfigCallPacket();
+                legacyPacket.player = null;
+                legacyPacket.build = canvas;
+                legacyPacket.value = legacy;
+
+                var stream2 = new arc.util.io.ReusableByteOutStream();
+                var writes2 = new arc.util.io.Writes(new java.io.DataOutputStream(stream2));
+                writes2.i(canvas.pos());
+                writes2.i(rgba.length);
+                writes2.b(rgba);
+                byte[] payload = stream2.toByteArray();
+
+                for(mindustry.gen.Player other : mindustry.gen.Groups.player){
+                    if(other.con == null) continue;
+                    if(other.con.deltaClient){
+                        Call.clientBinaryPacketReliable(other.con, "delta-canvas-true", payload);
+                    }else{
+                        other.con.send(legacyPacket, true);
+                    }
+                }
+            }else{
+                // singleplayer/offline – apply directly
+                canvas.applyTrueColor(rgba);
+            }
             modified = false;
         }
     }
