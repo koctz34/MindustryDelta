@@ -14,6 +14,8 @@ public abstract class NetConnection{
     public final String address;
     public String uuid = "AAAAAAAA", usid = uuid;
     public boolean mobile, modclient;
+    /** True if this connection explicitly supports DELTA extensions (handshake). */
+    public boolean deltaClient;
     public @Nullable Player player;
     public boolean kicked = false;
     public long syncTime;
