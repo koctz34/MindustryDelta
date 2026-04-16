@@ -9,4 +9,5 @@ Key changes from the standard version of Mindustry:
 - Modified network protocols:
   - Increased maximum packet size
   - Client synchronization with vanilla clients
-  - 
+
+[![Discord](https://img.shields.io/discord/ID_СЕРВЕРА?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/p2rscmatx9)
