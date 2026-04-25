@@ -23,6 +23,7 @@ import static mindustry.Vars.*;
 
 public class CanvasEditDialog extends BaseDialog{
     static final float refreshTime = 60f * 2f;
+    static final String customPaletteKey = "canvas-custom-palette";
 
     int curColor;
     boolean fill, modified, grid = true;
@@ -37,6 +38,8 @@ public class CanvasEditDialog extends BaseDialog{
     int brush = 1;
     /** Prevents RGBA slider {@code moved()} from mixing stale channel values when sliders are set programmatically. */
     boolean syncingColorUi;
+    boolean deletePaletteMode;
+    Seq<Integer> customPalette;
 
     public CanvasEditDialog(CanvasBuild canvas){
         super("");
@@ -48,6 +51,7 @@ public class CanvasEditDialog extends BaseDialog{
         texture = new Texture(pix);
         curColor = block.palette[0];
         current.set(curColor);
+        customPalette = Core.settings.getJson(customPaletteKey, Seq.class, Integer.class, Seq::new);
 
         addCloseButton(160f);
 
@@ -294,20 +298,68 @@ public class CanvasEditDialog extends BaseDialog{
             t.button(Icon.grid, Styles.clearNoneTogglei, () -> grid = !grid).checked(grid).size(44f);
         });
 
-        // Vanilla-style palette: Tex.whiteui + squareTogglei + imageUpColor (same as stock Canvas UI).
+        // Palette with persistent custom colors.
         cont.table(Tex.button, p -> {
-            for(int i = 0; i < block.palette.length; i++){
-                int fi = i;
+            Runnable[] rebuild = {null};
+            rebuild[0] = () -> {
+                p.clearChildren();
 
-                if(i % 12 == 0){
-                    p.row();
+                // toolbar row
+                p.table(bar -> {
+                    bar.left();
+                    bar.defaults().size(44f).padRight(4f);
+
+                    // add current color to custom palette
+                    bar.button(Icon.add, Styles.clearNoneTogglei, () -> {
+                        int rgba = curColor;
+                        // keep alpha consistent
+                        if(Color.ai(rgba) == 0) rgba |= 0xff;
+                        if(!customPalette.contains(rgba, false)){
+                            customPalette.add(rgba);
+                            Core.settings.putJson(customPaletteKey, Integer.class, customPalette);
+                        }
+                        rebuild[0].run();
+                    }).tooltip("@add");
+
+                    // toggle delete mode for custom colors
+                    bar.button(Icon.trash, Styles.clearNoneTogglei, () -> {
+                        deletePaletteMode = !deletePaletteMode;
+                    }).checked(b -> deletePaletteMode).tooltip("@save.delete");
+                }).growX().left().row();
+
+                int cols = 12;
+                int idx = 0;
+
+                // base palette
+                for(int i = 0; i < block.palette.length; i++){
+                    if(idx % cols == 0) p.row();
+                    int rgba = block.palette[i];
+                    ImageButton button = p.button(Tex.whiteui, Styles.squareTogglei, 30f, () -> {
+                        setColor(rgba);
+                    }).size(44f).checked(b -> curColor == rgba).get();
+                    button.getStyle().imageUpColor = new Color(rgba);
+                    idx++;
                 }
 
-                ImageButton button = p.button(Tex.whiteui, Styles.squareTogglei, 30f, () -> {
-                    setColor(block.palette[fi]);
-                }).size(44f).checked(b -> curColor == block.palette[fi]).get();
-                button.getStyle().imageUpColor = new Color(block.palette[i]);
-            }
+                // custom palette (persisted)
+                for(int i = 0; i < customPalette.size; i++){
+                    if(idx % cols == 0) p.row();
+                    int rgba = customPalette.get(i);
+                    ImageButton button = p.button(Tex.whiteui, Styles.squareTogglei, 30f, () -> {
+                        if(deletePaletteMode){
+                            customPalette.remove(Integer.valueOf(rgba), false);
+                            Core.settings.putJson(customPaletteKey, Integer.class, customPalette);
+                            rebuild[0].run();
+                        }else{
+                            setColor(rgba);
+                        }
+                    }).size(44f).checked(b -> curColor == rgba).get();
+                    button.getStyle().imageUpColor = new Color(rgba);
+                    idx++;
+                }
+            };
+
+            rebuild[0].run();
         });
 
         cont.table(Tex.button, t -> {
