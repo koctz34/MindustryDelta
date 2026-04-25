@@ -215,7 +215,20 @@ public class Schematics implements Loadable{
             Draw.reset();
             Tmp.m1.set(Draw.proj());
             Tmp.m2.set(Draw.trans());
-            FrameBuffer buffer = new FrameBuffer((schematic.width + padding) * resolution, (schematic.height + padding) * resolution);
+
+            //Creating huge schematic previews can stall the UI or exceed GPU texture limits.
+            //Downscale the preview when it gets too big or too dense.
+            int previewRes = resolution;
+            int maxTex = Math.max(512, Vars.maxTextureSize);
+            while(((schematic.width + padding) * previewRes > maxTex || (schematic.height + padding) * previewRes > maxTex) && previewRes > 4){
+                previewRes /= 2;
+            }
+            //extra downscale for large schematics (keeps UI responsive)
+            if(schematic.tiles.size > 128 && previewRes > 16){
+                previewRes = 16;
+            }
+
+            FrameBuffer buffer = new FrameBuffer((schematic.width + padding) * previewRes, (schematic.height + padding) * previewRes);
 
             shadowBuffer.begin(Color.clear);
 
@@ -251,7 +264,7 @@ public class Schematics implements Loadable{
 
             Draw.flush();
             //scale each plan to fit schematic
-            Draw.trans().scale(resolution / tilesize, resolution / tilesize).translate(tilesize*1.5f, tilesize*1.5f);
+            Draw.trans().scale(previewRes / tilesize, previewRes / tilesize).translate(tilesize*1.5f, tilesize*1.5f);
 
             QueryEachable eachPlans = new QueryEachable(null, plans);
 
