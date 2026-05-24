@@ -32,6 +32,9 @@ public class NewsFragment{
     }
 
     public void build(Group parent){
+        // World news panel is desktop-only; it clutters the main menu on Android.
+        if(android) return;
+
         group = new WidgetGroup();
         group.setFillParent(true);
         group.touchable = Touchable.childrenOnly;

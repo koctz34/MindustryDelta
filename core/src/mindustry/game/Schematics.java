@@ -49,7 +49,7 @@ public class Schematics implements Loadable{
 
     private static final byte[] header = {'m', 's', 'c', 'h'};
     private static final byte version = 1;
-    private static final boolean limitSchematicSize = true;
+    private static final boolean limitSchematicSize = false;
 
     private static final int padding = 2;
     private static final int maxPreviewsMobile = 32;

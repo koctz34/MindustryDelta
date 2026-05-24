@@ -48,6 +48,7 @@ public class CanvasBlock extends Block{
         config(byte[].class, (CanvasBuild build, byte[] bytes) -> {
             // truecolor payload
             if(trueColor && bytes.length == trueColorLength()){
+                if(build.data.length != bytes.length) build.data = new byte[bytes.length];
                 System.arraycopy(bytes, 0, build.data, 0, bytes.length);
                 build.invalidateAll();
                 return;
@@ -240,6 +241,7 @@ public class CanvasBlock extends Block{
         /** Applies a truecolor RGBA8888 payload to this canvas. */
         public void applyTrueColor(byte[] rgba){
             if(!trueColor || rgba == null || rgba.length != trueColorLength()) return;
+            if(data.length != rgba.length) data = new byte[rgba.length];
             System.arraycopy(rgba, 0, data, 0, rgba.length);
             invalidateAll();
         }
@@ -522,6 +524,13 @@ public class CanvasBlock extends Block{
             super.read(read, revision);
 
             int len = read.i();
+            if(trueColor && len == trueColorLength()){
+                if(data.length != len) data = new byte[len];
+                read.b(data);
+                invalidateAll();
+                return;
+            }
+
             if(data.length == len){
                 read.b(data);
                 invalidateAll();

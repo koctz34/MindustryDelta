@@ -169,6 +169,11 @@ public class Vars implements Loadable{
     };
     /** maximum TCP packet size */
     public static final int maxTcpSize = 1100;
+    /**
+     * Max serialized size of one network packet (Arc TCP, Steam P2P, {@link mindustry.net.ArcNetProvider.PacketSerializer}).
+     * Wire format uses u16 length (cap 65535). Must fit large truecolor canvas payloads (e.g. 64×64 RGBA ≈ 16 KiB + framing).
+     */
+    public static final int maxNetworkPacketBytes = 65536;
     /** default server port */
     public static final int port = 6567;
     /** multicast discovery port.*/
@@ -185,8 +190,8 @@ public class Vars implements Loadable{
     public static boolean hadSerpuloRemaps = false;
     /** max GL texture size */
     public static int maxTextureSize = 2048;
-    /** Maximum schematic size.*/
-    public static int maxSchematicSize = 64;
+    /** Maximum schematic selection size in the world (blocks). */
+    public static int maxSchematicSize = 512;
     /** Whether to show sector info upon landing. */
     public static boolean showSectorLandInfo = true;
     /** Whether to check for memory use before taking screenshots. */

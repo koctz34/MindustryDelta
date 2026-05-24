@@ -24,9 +24,12 @@ import static mindustry.Vars.*;
 public class CanvasEditDialog extends BaseDialog{
     static final float refreshTime = 60f * 2f;
     static final String customPaletteKey = "canvas-custom-palette";
+    static final int maxHistory = 10;
+    static Pixmap clipboard;
+    static Texture clipboardTexture;
 
     int curColor;
-    boolean fill, modified, grid = true;
+    boolean modified, grid = true;
     float time;
     CanvasBuild canvas;
     CanvasBlock block;
@@ -40,6 +43,18 @@ public class CanvasEditDialog extends BaseDialog{
     boolean syncingColorUi;
     boolean deletePaletteMode;
     Seq<Integer> customPalette;
+    Seq<Pixmap> undoStack = new Seq<>(), redoStack = new Seq<>();
+    CanvasTool tool = CanvasTool.brush;
+    PasteRegion paste;
+    boolean actionOpen, actionChanged;
+
+    enum CanvasTool{
+        brush, fill, line, rect, rectFill, circle, circleFill, copy, paste
+    }
+
+    static class PasteRegion{
+        int x, y;
+    }
 
     public CanvasEditDialog(CanvasBuild canvas){
         super("");
@@ -62,6 +77,8 @@ public class CanvasEditDialog extends BaseDialog{
         hidden(() -> {
             save();
 
+            clearHistory(undoStack);
+            clearHistory(redoStack);
             texture.dispose();
             pix.dispose();
         });
@@ -82,12 +99,30 @@ public class CanvasEditDialog extends BaseDialog{
             }
         });
 
+        cont.table(Tex.button, tools -> {
+            tools.defaults().height(44f).padRight(4f);
+            tools.button(Icon.pencil, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.brush)).size(44f).checked(b -> tool == CanvasTool.brush).tooltip("@canvas.brush");
+            tools.button(Icon.fill, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.fill)).size(44f).checked(b -> tool == CanvasTool.fill).tooltip("@canvas.fill");
+            tools.button(Icon.right, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.line)).size(44f).checked(b -> tool == CanvasTool.line).tooltip("@canvas.line");
+            tools.button(Icon.box, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.rect)).size(44f).checked(b -> tool == CanvasTool.rect).tooltip("@canvas.rect");
+            tools.button(Icon.box, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.rectFill)).size(44f).checked(b -> tool == CanvasTool.rectFill).tooltip("@canvas.rectfill");
+            tools.button(Icon.commandRally, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.circle)).size(44f).checked(b -> tool == CanvasTool.circle).tooltip("@canvas.circle");
+            tools.button(Icon.commandRally, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.circleFill)).size(44f).checked(b -> tool == CanvasTool.circleFill).tooltip("@canvas.circlefill");
+            tools.button(Icon.copy, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.copy)).size(44f).checked(b -> tool == CanvasTool.copy).tooltip("@canvas.copy");
+            tools.button(Icon.paste, Styles.clearNoneTogglei, this::startPaste).size(44f).checked(b -> tool == CanvasTool.paste).disabled(b -> clipboard == null).tooltip("@canvas.paste");
+            tools.button(Icon.undo, Styles.clearNonei, this::undo).size(44f).disabled(b -> undoStack.isEmpty()).tooltip("@canvas.undo");
+            tools.button(Icon.redo, Styles.clearNonei, this::redo).size(44f).disabled(b -> redoStack.isEmpty()).tooltip("@canvas.redo");
+            tools.button(Icon.ok, Styles.clearNonei, this::confirmPaste).size(44f).visible(() -> paste != null).tooltip("@canvas.confirm");
+            tools.button(Icon.cancel, Styles.clearNonei, this::cancelPaste).size(44f).visible(() -> paste != null).tooltip("@canvas.cancel");
+        }).colspan(3).left().row();
+
         cont.table(Tex.pane, body -> {
             body.center();
 
             //canvas element centered; tools panel is separate
             var canvasElement = new Element(){
-                int lastX, lastY;
+                int lastX, lastY, startX, startY, endX, endY;
+                boolean dragging, movingPaste;
                 IntSeq stack = new IntSeq();
 
                 int convertX(float ex){
@@ -106,8 +141,16 @@ public class CanvasEditDialog extends BaseDialog{
                             int cx = convertX(ex), cy = convertY(ey);
 
                             if(button == KeyCode.mouseLeft){
-                                if(fill){
-                                    if(!pix.in(cx, cy)) return false;
+                                if(tool == CanvasTool.paste && paste != null){
+                                    movingPaste = true;
+                                    movePaste(cx, cy);
+                                    return true;
+                                }
+
+                                if(!pix.in(cx, cy)) return false;
+
+                                if(tool == CanvasTool.fill){
+                                    beginAction();
                                     stack.clear();
                                     int src = curColor;
                                     int dst = pix.get(cx, cy);
@@ -125,15 +168,21 @@ public class CanvasEditDialog extends BaseDialog{
                                             }
                                         }
                                     }
+                                    finishAction();
 
                                     return false;
-                                }else{
+                                }else if(tool == CanvasTool.brush){
+                                    beginAction();
                                     drawBrush(cx, cy);
                                     lastX = cx;
                                     lastY = cy;
+                                }else{
+                                    dragging = true;
+                                    startX = endX = cx;
+                                    startY = endY = cy;
                                 }
                             }else if(button == KeyCode.mouseMiddle){
-                                CanvasEditDialog.this.setColor(pix.get(cx, cy));
+                                if(pix.in(cx, cy)) CanvasEditDialog.this.setColor(pix.get(cx, cy));
                                 return false;
                             }
                             return true;
@@ -141,29 +190,48 @@ public class CanvasEditDialog extends BaseDialog{
 
                         @Override
                         public void touchDragged(InputEvent event, float ex, float ey, int pointer){
-                            if(fill) return;
                             int cx = convertX(ex), cy = convertY(ey);
-                            Bresenham2.line(lastX, lastY, cx, cy, (x, y) -> drawBrush(x, y));
-                            lastX = cx;
-                            lastY = cy;
-                        }
-                    });
-                }
-
-                void drawBrush(int x, int y){
-                    int radius = Math.max(0, brush - 1);
-                    int rr = radius * radius;
-                    for(int dx = -radius; dx <= radius; dx++){
-                        for(int dy = -radius; dy <= radius; dy++){
-                            if(dx*dx + dy*dy > rr) continue;
-                            int px = x + dx, py = y + dy;
-                            if(pix.in(px, py) && pix.get(px, py) != curColor){
-                                pix.set(px, py, curColor);
-                                Pixmaps.drawPixel(texture, px, py, curColor);
-                                modified = true;
+                            if(movingPaste){
+                                movePaste(cx, cy);
+                                return;
+                            }
+                            if(tool == CanvasTool.brush){
+                                Bresenham2.line(lastX, lastY, cx, cy, (x, y) -> drawBrush(x, y));
+                                lastX = cx;
+                                lastY = cy;
+                            }else if(dragging){
+                                endX = Mathf.clamp(cx, 0, pix.width - 1);
+                                endY = Mathf.clamp(cy, 0, pix.height - 1);
                             }
                         }
-                    }
+
+                        @Override
+                        public void touchUp(InputEvent event, float ex, float ey, int pointer, KeyCode button){
+                            if(button != KeyCode.mouseLeft) return;
+                            int cx = Mathf.clamp(convertX(ex), 0, pix.width - 1), cy = Mathf.clamp(convertY(ey), 0, pix.height - 1);
+
+                            if(movingPaste){
+                                movingPaste = false;
+                                movePaste(cx, cy);
+                                return;
+                            }
+
+                            if(tool == CanvasTool.brush){
+                                finishAction();
+                            }else if(dragging){
+                                endX = cx;
+                                endY = cy;
+                                if(tool == CanvasTool.copy){
+                                    copySelection(startX, startY, endX, endY);
+                                }else{
+                                    beginAction();
+                                    drawShape(tool, startX, startY, endX, endY);
+                                    finishAction();
+                                }
+                                dragging = false;
+                            }
+                        }
+                    });
                 }
 
                 @Override
@@ -171,6 +239,8 @@ public class CanvasEditDialog extends BaseDialog{
                     Tmp.tr1.set(texture);
                     Draw.alpha(parentAlpha);
                     Draw.rect(Tmp.tr1, x + width/2f, y + height/2f, width, height);
+
+                    drawPastePreview(x, y, width / size, height / size, parentAlpha);
 
                     //draw grid
                     if(grid){
@@ -203,6 +273,10 @@ public class CanvasEditDialog extends BaseDialog{
 
                             Draw.reset();
                         }
+                    }
+
+                    if(dragging){
+                        drawToolPreview(tool, startX, startY, endX, endY, x, y, width / size, height / size, parentAlpha);
                     }
                 }
             };
@@ -362,10 +436,6 @@ public class CanvasEditDialog extends BaseDialog{
             rebuild[0].run();
         });
 
-        cont.table(Tex.button, t -> {
-            t.button(Icon.fill, Styles.clearNoneTogglei, () -> fill = !fill).size(44f);
-        });
-
         buttons.defaults().size(150f, 64f);
     }
 
@@ -388,24 +458,264 @@ public class CanvasEditDialog extends BaseDialog{
                 source.dispose();
                 source = dest;
             }else if(source.width < size || source.height < size){
-                pix.fill(block.palette[0]);
                 Pixmap dest = new Pixmap(size, size);
                 dest.draw(source, (size - source.width)/2, (size - source.height)/2);
                 source.dispose();
                 source = dest;
             }
+            beginAction();
             int sizeX = Math.min(source.width, pix.width), sizeY = Math.min(source.height, pix.height);
             for(int x = 0; x < sizeX; x++){
                 for(int y = 0; y < sizeY; y++){
                     pix.setRaw(x, y, source.getRaw(x, y));
                 }
             }
+            source.dispose();
 
             texture.draw(pix);
-            modified = true;
+            actionChanged = true;
+            finishAction();
         }catch(Exception e){
             ui.showException("@editor.errorload", e);
         }
+    }
+
+    void selectTool(CanvasTool next){
+        if(next != CanvasTool.paste) paste = null;
+        tool = next;
+    }
+
+    void beginAction(){
+        if(actionOpen) return;
+        pushHistory(undoStack, copyPixmap(pix));
+        clearHistory(redoStack);
+        actionOpen = true;
+        actionChanged = false;
+    }
+
+    void finishAction(){
+        if(!actionOpen) return;
+        actionOpen = false;
+
+        if(actionChanged){
+            modified = true;
+        }else if(!undoStack.isEmpty()){
+            undoStack.pop().dispose();
+        }
+    }
+
+    void pushHistory(Seq<Pixmap> stack, Pixmap snapshot){
+        stack.add(snapshot);
+        while(stack.size > maxHistory){
+            stack.remove(0).dispose();
+        }
+    }
+
+    Pixmap copyPixmap(Pixmap source){
+        Pixmap copy = new Pixmap(source.width, source.height);
+        for(int x = 0; x < source.width; x++){
+            for(int y = 0; y < source.height; y++){
+                copy.setRaw(x, y, source.getRaw(x, y));
+            }
+        }
+        return copy;
+    }
+
+    void applySnapshot(Pixmap snapshot){
+        for(int x = 0; x < pix.width; x++){
+            for(int y = 0; y < pix.height; y++){
+                pix.setRaw(x, y, snapshot.getRaw(x, y));
+            }
+        }
+        texture.draw(pix);
+        modified = true;
+    }
+
+    void undo(){
+        if(undoStack.isEmpty()) return;
+        pushHistory(redoStack, copyPixmap(pix));
+        Pixmap snapshot = undoStack.pop();
+        applySnapshot(snapshot);
+        snapshot.dispose();
+    }
+
+    void redo(){
+        if(redoStack.isEmpty()) return;
+        pushHistory(undoStack, copyPixmap(pix));
+        Pixmap snapshot = redoStack.pop();
+        applySnapshot(snapshot);
+        snapshot.dispose();
+    }
+
+    void clearHistory(Seq<Pixmap> stack){
+        for(Pixmap p : stack){
+            p.dispose();
+        }
+        stack.clear();
+    }
+
+    boolean drawPixel(int x, int y, int color){
+        if(!pix.in(x, y) || pix.get(x, y) == color) return false;
+        pix.set(x, y, color);
+        Pixmaps.drawPixel(texture, x, y, color);
+        actionChanged = true;
+        return true;
+    }
+
+    void drawBrush(int x, int y){
+        int radius = Math.max(0, brush - 1);
+        int rr = radius * radius;
+        for(int dx = -radius; dx <= radius; dx++){
+            for(int dy = -radius; dy <= radius; dy++){
+                if(dx*dx + dy*dy > rr) continue;
+                drawPixel(x + dx, y + dy, curColor);
+            }
+        }
+    }
+
+    void drawShape(CanvasTool shape, int x1, int y1, int x2, int y2){
+        switch(shape){
+            case line -> Bresenham2.line(x1, y1, x2, y2, this::drawBrush);
+            case rect -> drawRect(x1, y1, x2, y2, false);
+            case rectFill -> drawRect(x1, y1, x2, y2, true);
+            case circle -> drawEllipse(x1, y1, x2, y2, false);
+            case circleFill -> drawEllipse(x1, y1, x2, y2, true);
+            default -> {
+            }
+        }
+    }
+
+    void drawRect(int x1, int y1, int x2, int y2, boolean filled){
+        int minx = Math.min(x1, x2), maxx = Math.max(x1, x2);
+        int miny = Math.min(y1, y2), maxy = Math.max(y1, y2);
+
+        for(int x = minx; x <= maxx; x++){
+            for(int y = miny; y <= maxy; y++){
+                if(filled || x == minx || x == maxx || y == miny || y == maxy) drawPixel(x, y, curColor);
+            }
+        }
+    }
+
+    void drawEllipse(int x1, int y1, int x2, int y2, boolean filled){
+        int minx = Math.min(x1, x2), maxx = Math.max(x1, x2);
+        int miny = Math.min(y1, y2), maxy = Math.max(y1, y2);
+        float cx = (minx + maxx) / 2f, cy = (miny + maxy) / 2f;
+        float rx = Math.max(0.5f, (maxx - minx + 1f) / 2f), ry = Math.max(0.5f, (maxy - miny + 1f) / 2f);
+
+        for(int x = minx; x <= maxx; x++){
+            for(int y = miny; y <= maxy; y++){
+                float nx = (x + 0.5f - cx) / rx, ny = (y + 0.5f - cy) / ry;
+                float dst = nx * nx + ny * ny;
+                if(filled ? dst <= 1f : dst <= 1f && dst >= 0.72f) drawPixel(x, y, curColor);
+            }
+        }
+    }
+
+    void copySelection(int x1, int y1, int x2, int y2){
+        int minx = Math.min(x1, x2), maxx = Math.max(x1, x2);
+        int miny = Math.min(y1, y2), maxy = Math.max(y1, y2);
+        clearClipboard();
+
+        clipboard = new Pixmap(maxx - minx + 1, maxy - miny + 1);
+        for(int x = 0; x < clipboard.width; x++){
+            for(int y = 0; y < clipboard.height; y++){
+                clipboard.setRaw(x, y, pix.getRaw(minx + x, miny + y));
+            }
+        }
+        clipboardTexture = new Texture(clipboard);
+    }
+
+    void startPaste(){
+        if(clipboard == null) return;
+        tool = CanvasTool.paste;
+        paste = new PasteRegion();
+        paste.x = Math.max(0, (pix.width - clipboard.width) / 2);
+        paste.y = Math.max(0, (pix.height - clipboard.height) / 2);
+    }
+
+    void movePaste(int cx, int cy){
+        if(paste == null || clipboard == null) return;
+        paste.x = Mathf.clamp(cx - clipboard.width / 2, 0, Math.max(0, pix.width - clipboard.width));
+        paste.y = Mathf.clamp(cy - clipboard.height / 2, 0, Math.max(0, pix.height - clipboard.height));
+    }
+
+    void confirmPaste(){
+        if(paste == null || clipboard == null) return;
+        beginAction();
+        for(int x = 0; x < clipboard.width; x++){
+            for(int y = 0; y < clipboard.height; y++){
+                drawPixel(paste.x + x, paste.y + y, clipboard.get(x, y));
+            }
+        }
+        finishAction();
+        paste = null;
+        tool = CanvasTool.brush;
+    }
+
+    void cancelPaste(){
+        paste = null;
+        if(tool == CanvasTool.paste) tool = CanvasTool.brush;
+    }
+
+    void clearClipboard(){
+        if(clipboardTexture != null){
+            clipboardTexture.dispose();
+            clipboardTexture = null;
+        }
+        if(clipboard != null){
+            clipboard.dispose();
+            clipboard = null;
+        }
+        paste = null;
+    }
+
+    float screenY(float oy, float yspace, int pixY){
+        return oy + (pix.height - 1 - pixY) * yspace;
+    }
+
+    float screenCenterY(float oy, float yspace, int pixY){
+        return screenY(oy, yspace, pixY) + yspace / 2f;
+    }
+
+    void drawPastePreview(float ox, float oy, float xspace, float yspace, float alpha){
+        if(paste == null || clipboardTexture == null) return;
+        float px = ox + paste.x * xspace;
+        float py = oy + (pix.height - paste.y - clipboard.height) * yspace;
+        Tmp.tr1.set(clipboardTexture);
+        Draw.color(1f, 1f, 1f, 0.55f * alpha);
+        Draw.rect(Tmp.tr1, px + clipboard.width * xspace / 2f, py + clipboard.height * yspace / 2f, clipboard.width * xspace, clipboard.height * yspace);
+        Draw.color(Pal.accent, alpha);
+        Lines.stroke(Scl.scl(2f));
+        Lines.rect(px, py, clipboard.width * xspace, clipboard.height * yspace);
+        Draw.reset();
+    }
+
+    void drawToolPreview(CanvasTool preview, int x1, int y1, int x2, int y2, float ox, float oy, float xspace, float yspace, float alpha){
+        int minPixX = Math.min(x1, x2), maxPixX = Math.max(x1, x2);
+        int minPixY = Math.min(y1, y2), maxPixY = Math.max(y1, y2);
+        float minx = ox + minPixX * xspace, maxx = ox + (maxPixX + 1) * xspace;
+        float miny = screenY(oy, yspace, maxPixY), maxy = screenY(oy, yspace, minPixY) + yspace;
+
+        Draw.color(preview == CanvasTool.copy ? Pal.accent : current, alpha);
+        Lines.stroke(Scl.scl(2f));
+        switch(preview){
+            case line -> Lines.line(ox + (x1 + 0.5f) * xspace, screenCenterY(oy, yspace, y1), ox + (x2 + 0.5f) * xspace, screenCenterY(oy, yspace, y2));
+            case rect, copy -> Lines.rect(minx, miny, maxx - minx, maxy - miny);
+            case rectFill -> {
+                Draw.alpha(0.25f * alpha);
+                Fill.crect(minx, miny, maxx - minx, maxy - miny);
+                Draw.color(current, alpha);
+                Lines.rect(minx, miny, maxx - minx, maxy - miny);
+            }
+            case circle -> Lines.ellipse(40, (minx + maxx) / 2f, (miny + maxy) / 2f, (maxx - minx) / 2f, (maxy - miny) / 2f, 0f);
+            case circleFill -> {
+                Draw.color(current, alpha);
+                Lines.ellipse(40, (minx + maxx) / 2f, (miny + maxy) / 2f, (maxx - minx) / 2f, (maxy - miny) / 2f, 0f);
+            }
+            default -> {
+            }
+        }
+        Draw.reset();
     }
 
     void setColor(int rgba){

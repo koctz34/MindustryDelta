@@ -29,9 +29,9 @@ public class SNet implements SteamNetworkingCallback, SteamMatchmakingCallback, 
     final NetProvider provider;
 
     final PacketSerializer serializer = new PacketSerializer();
-    final ByteBuffer writeBuffer = ByteBuffer.allocateDirect(16384);
-    final ByteBuffer readBuffer = ByteBuffer.allocateDirect(16384);
-    final ByteBuffer readCopyBuffer = ByteBuffer.allocate(writeBuffer.capacity());
+    final ByteBuffer writeBuffer = ByteBuffer.allocateDirect(maxNetworkPacketBytes);
+    final ByteBuffer readBuffer = ByteBuffer.allocateDirect(maxNetworkPacketBytes);
+    final ByteBuffer readCopyBuffer = ByteBuffer.allocate(maxNetworkPacketBytes);
 
     final CopyOnWriteArrayList<SteamConnection> connections = new CopyOnWriteArrayList<>();
     final IntMap<SteamConnection> steamConnections = new IntMap<>(); //maps steam ID -> valid net connection
