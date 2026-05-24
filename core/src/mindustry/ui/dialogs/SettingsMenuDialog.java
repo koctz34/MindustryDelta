@@ -24,6 +24,7 @@ import mindustry.gen.*;
 import mindustry.graphics.*;
 import mindustry.input.*;
 import mindustry.ui.*;
+import mindustry.ui.news.NewsSettings;
 
 import java.io.*;
 import java.util.zip.*;
@@ -376,6 +377,15 @@ public class SettingsMenuDialog extends BaseDialog{
         }
 
         game.checkPref("console", false);
+
+        Runnable newsSettingsChanged = () -> Core.app.post(() -> {
+            if(ui.newsService != null) ui.newsService.onSettingsChanged();
+            if(ui.newsfrag != null) ui.newsfrag.rebuildItems();
+        });
+        game.checkPref(NewsSettings.enabled, true, b -> newsSettingsChanged.run());
+        game.checkPref(NewsSettings.sourceKeys[0], true, b -> newsSettingsChanged.run());
+        game.checkPref(NewsSettings.sourceKeys[1], true, b -> newsSettingsChanged.run());
+        game.checkPref(NewsSettings.sourceKeys[2], true, b -> newsSettingsChanged.run());
 
         graphics.sliderPref("uiEdgePadding", 0, 0, 100, s -> s + "px", s -> {
             if(ui != null){

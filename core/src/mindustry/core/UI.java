@@ -29,6 +29,7 @@ import mindustry.mod.*;
 import mindustry.ui.*;
 import mindustry.ui.dialogs.*;
 import mindustry.ui.fragments.*;
+import mindustry.ui.news.*;
 
 import static arc.scene.actions.Actions.*;
 import static mindustry.Vars.*;
@@ -41,6 +42,10 @@ public class UI implements ApplicationListener, Loadable{
     public static PixmapPacker packer;
 
     public MenuFragment menufrag;
+    public NewsFragment newsfrag;
+    public NewsService newsService;
+    public NewsDetailDialog newsDetail;
+    public NewsListDialog newsList;
     public HudFragment hudfrag;
     public ChatFragment chatfrag;
     public ConsoleFragment consolefrag;
@@ -186,6 +191,10 @@ public class UI implements ApplicationListener, Loadable{
         hudGroup = new WidgetGroup();
 
         menufrag = new MenuFragment();
+        newsService = new NewsService();
+        newsfrag = new NewsFragment(newsService);
+        newsDetail = new NewsDetailDialog();
+        newsList = new NewsListDialog();
         hudfrag = new HudFragment();
         hints = new HintsFragment();
         chatfrag = new ChatFragment();
@@ -238,6 +247,7 @@ public class UI implements ApplicationListener, Loadable{
 
         hudfrag.build(hudGroup);
         menufrag.build(menuGroup);
+        newsfrag.build(menuGroup);
         chatfrag.build(hudGroup);
         minimapfrag.build(hudGroup);
         listfrag.build(hudGroup);

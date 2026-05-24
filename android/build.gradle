@@ -131,26 +131,27 @@ dependencies{
         natives "com.github.Anuken.Arc:natives-freetype-android:$arcHash"
     }
 
-    def version, highestVersion
-    new File((String)findSdkDir(), "/platforms").eachFileMatch ~/android-\d+/, {
-        version = it.name.find(/\d+/).toInteger()
-        highestVersion = version > highestVersion ? version : highestVersion
-    }
-
-    def sdkFile = new File((String)findSdkDir(), "/platforms/android-${highestVersion}/android.jar")
-    if(sdkFile.exists()) compileOnly files(sdkFile.absolutePath)
+    def sdkJar = new File((String)findSdkDir(), "platforms/android-36/android.jar")
+    if(sdkJar.exists()) compileOnly files(sdkJar)
 }
 
 task copyAndroidNatives(){
     if(!localArc){
-        configurations.natives.files.each{ jar ->
-            copy{
-                from zipTree(jar)
-                into file("libs/")
-                include "**"
+        dependsOn configurations.natives
+        doLast{
+            configurations.natives.files.each{ jar ->
+                copy{
+                    from zipTree(jar)
+                    into file("libs/")
+                    include "**"
+                }
             }
         }
     }
+}
+
+tasks.named("preBuild").configure{
+    dependsOn copyAndroidNatives
 }
 
 task run(type: Exec){
