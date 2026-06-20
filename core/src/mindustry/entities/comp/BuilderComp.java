@@ -91,14 +91,14 @@ abstract class BuilderComp implements Posc, Statusc, Teamc, Rotc{
             return;
         }
 
-        float finalPlaceDst = state.rules.infiniteResources ? Float.MAX_VALUE : type.buildRange;
+        float finalPlaceDst = buildRangeLimit();
         boolean infinite = state.rules.infiniteResources || team().rules().infiniteResources;
 
         buildCounter += Time.delta;
         if(Float.isNaN(buildCounter) || Float.isInfinite(buildCounter)) buildCounter = 0f;
         buildCounter = Math.min(buildCounter, 10f);
 
-        boolean instant = state.rules.instantBuild && state.rules.infiniteResources;
+        boolean instant = state.rules.instantBuild && !net.client();
 
         //random attempt to fix a freeze that only occurs on Android
         int maxPerFrame = instant ? plans.size : 10, count = 0;
@@ -170,14 +170,7 @@ abstract class BuilderComp implements Posc, Statusc, Teamc, Rotc{
                         !Structs.contains(current.block.requirements, i -> !core.items.has(i.item, Math.min(Mathf.round(i.amount * state.rules.buildCostMultiplier), 1)));
 
                         if(hasAll){
-                            Call.beginPlace(self(), current.block, team, current.x, current.y, current.rotation, current.block.instantBuild ? current.config : null);
-
-                            if(!net.client() && current.block.instantBuild){
-                                if(plans.size > 0){
-                                    plans.removeFirst();
-                                }
-                                continue;
-                            }
+                            Call.beginPlace(self(), current.block, team, current.x, current.y, current.rotation, (current.block.instantBuild || state.rules.instantBuild) ? current.config : null);
                         }else{
                             current.stuck = true;
                         }
@@ -189,6 +182,12 @@ abstract class BuilderComp implements Posc, Statusc, Teamc, Rotc{
                     }
                 }else if(!current.initialized && current.breaking && Build.validBreak(team, current.x, current.y)){
                     Call.beginBreak(self(), team, current.x, current.y);
+                    if(!net.client() && state.rules.instantBuild){
+                        if(plans.size > 0){
+                            plans.removeFirst();
+                        }
+                        continue;
+                    }
                 }else{
                     plans.removeFirst();
                     continue;
@@ -302,7 +301,7 @@ abstract class BuilderComp implements Posc, Statusc, Teamc, Rotc{
         //not actively building when not near the build plan
         if(isBuilding()){
             var plan = buildPlan();
-            if(!state.isEditor() && plan != null && !within(plan, state.rules.infiniteResources ? Float.MAX_VALUE : type.buildRange)){
+            if(!state.isEditor() && plan != null && !within(plan, buildRangeLimit())){
                 return false;
             }
         }
@@ -325,7 +324,7 @@ abstract class BuilderComp implements Posc, Statusc, Teamc, Rotc{
         Tile tile = plan.tile();
         var core = team.core();
 
-        if(tile == null || !within(plan, state.rules.infiniteResources ? Float.MAX_VALUE : type.buildRange)){
+        if(tile == null || !within(plan, buildRangeLimit())){
             return;
         }
 
@@ -355,7 +354,7 @@ abstract class BuilderComp implements Posc, Statusc, Teamc, Rotc{
         BuildPlan plan = active ? buildPlan() : lastActive;
         Tile tile = world.tile(plan.x, plan.y);
 
-        if(tile == null || !within(plan, state.rules.infiniteResources ? Float.MAX_VALUE : type.buildRange)){
+        if(tile == null || !within(plan, buildRangeLimit())){
             return;
         }
 
@@ -377,5 +376,9 @@ abstract class BuilderComp implements Posc, Statusc, Teamc, Rotc{
 
         Draw.reset();
         Draw.z(Layer.flyingUnit);
+    }
+
+    float buildRangeLimit(){
+        return state.rules.infiniteResources || state.rules.instantBuild ? Float.MAX_VALUE : type.buildRange;
     }
 }

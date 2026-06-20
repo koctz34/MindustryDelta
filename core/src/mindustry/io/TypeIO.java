@@ -466,25 +466,30 @@ public class TypeIO{
 
     /** @return the maximum acceptable amount of plans to send over the network */
     public static int getMaxPlans(Queue<BuildPlan> plans){
-        //limit to prevent buffer overflows
-        int used = Math.min(plans.size, 20);
+        //limit to prevent buffer overflows; instant-build maps need larger batches, but this still goes through UDP snapshots.
+        int used = Math.min(plans.size, state.rules.instantBuild ? 250 : 20);
+        int maxConfigBytes = state.rules.instantBuild ? 6 * 1024 : 500;
         int totalLength = 0;
 
         //prevent buffer overflow by checking config length
         for(int i = 0; i < used; i++){
             BuildPlan plan = plans.get(i);
+            int added = 0;
+
             if(plan.config instanceof byte[] b){
-                totalLength += b.length;
+                added += b.length;
             }
 
             if(plan.config instanceof String b){
-                totalLength += b.length();
+                added += b.length();
             }
 
-            if(totalLength > 500){
-                used = i + 1;
+            if(i > 0 && totalLength + added > maxConfigBytes){
+                used = i;
                 break;
             }
+
+            totalLength += added;
         }
 
         return used;

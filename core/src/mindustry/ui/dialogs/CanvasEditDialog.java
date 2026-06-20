@@ -2,6 +2,7 @@ package mindustry.ui.dialogs;
 
 import arc.*;
 import arc.files.*;
+import arc.func.*;
 import arc.graphics.*;
 import arc.graphics.g2d.*;
 import arc.input.*;
@@ -9,6 +10,7 @@ import arc.math.*;
 import arc.math.geom.*;
 import arc.scene.*;
 import arc.scene.event.*;
+import arc.scene.style.*;
 import arc.scene.ui.*;
 import arc.scene.ui.layout.*;
 import arc.struct.*;
@@ -24,12 +26,13 @@ import static mindustry.Vars.*;
 public class CanvasEditDialog extends BaseDialog{
     static final float refreshTime = 60f * 2f;
     static final String customPaletteKey = "canvas-custom-palette";
+    static final String layoutKey = "canvas-layout";
     static final int maxHistory = 10;
     static Pixmap clipboard;
     static Texture clipboardTexture;
 
     int curColor;
-    boolean modified, grid = true;
+    boolean modified, grid = false;
     float time;
     CanvasBuild canvas;
     CanvasBlock block;
@@ -47,6 +50,11 @@ public class CanvasEditDialog extends BaseDialog{
     CanvasTool tool = CanvasTool.brush;
     PasteRegion paste;
     boolean actionOpen, actionChanged;
+    boolean layoutEditing, toolsVertical;
+    float toolsX, toolsY, bodyX, bodyY, controlsX, controlsY, gridX, gridY, paletteX, paletteY;
+    float oldToolsX, oldToolsY, oldBodyX, oldBodyY, oldControlsX, oldControlsY, oldGridX, oldGridY, oldPaletteX, oldPaletteY;
+    boolean oldToolsVertical;
+    Table toolsPanel, bodyPanel, controlsPanel, gridPanel, palettePanel;
 
     enum CanvasTool{
         brush, fill, line, rect, rectFill, circle, circleFill, copy, paste
@@ -67,12 +75,9 @@ public class CanvasEditDialog extends BaseDialog{
         curColor = block.palette[0];
         current.set(curColor);
         customPalette = Core.settings.getJson(customPaletteKey, Seq.class, Integer.class, Seq::new);
+        loadLayout();
 
-        addCloseButton(160f);
-
-        buttons.button("@import", Icon.image, () -> platform.showFileChooser(true, "png", this::importFrom));
-
-        buttons.button("@export", Icon.export, () -> platform.showFileChooser(false, "png", this::exportTo));
+        rebuildButtons();
 
         hidden(() -> {
             save();
@@ -100,23 +105,12 @@ public class CanvasEditDialog extends BaseDialog{
         });
 
         cont.table(Tex.button, tools -> {
-            tools.defaults().height(44f).padRight(4f);
-            tools.button(Icon.pencil, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.brush)).size(44f).checked(b -> tool == CanvasTool.brush).tooltip("@canvas.brush");
-            tools.button(Icon.fill, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.fill)).size(44f).checked(b -> tool == CanvasTool.fill).tooltip("@canvas.fill");
-            tools.button(Icon.right, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.line)).size(44f).checked(b -> tool == CanvasTool.line).tooltip("@canvas.line");
-            tools.button(Icon.box, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.rect)).size(44f).checked(b -> tool == CanvasTool.rect).tooltip("@canvas.rect");
-            tools.button(Icon.box, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.rectFill)).size(44f).checked(b -> tool == CanvasTool.rectFill).tooltip("@canvas.rectfill");
-            tools.button(Icon.commandRally, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.circle)).size(44f).checked(b -> tool == CanvasTool.circle).tooltip("@canvas.circle");
-            tools.button(Icon.commandRally, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.circleFill)).size(44f).checked(b -> tool == CanvasTool.circleFill).tooltip("@canvas.circlefill");
-            tools.button(Icon.copy, Styles.clearNoneTogglei, () -> selectTool(CanvasTool.copy)).size(44f).checked(b -> tool == CanvasTool.copy).tooltip("@canvas.copy");
-            tools.button(Icon.paste, Styles.clearNoneTogglei, this::startPaste).size(44f).checked(b -> tool == CanvasTool.paste).disabled(b -> clipboard == null).tooltip("@canvas.paste");
-            tools.button(Icon.undo, Styles.clearNonei, this::undo).size(44f).disabled(b -> undoStack.isEmpty()).tooltip("@canvas.undo");
-            tools.button(Icon.redo, Styles.clearNonei, this::redo).size(44f).disabled(b -> redoStack.isEmpty()).tooltip("@canvas.redo");
-            tools.button(Icon.ok, Styles.clearNonei, this::confirmPaste).size(44f).visible(() -> paste != null).tooltip("@canvas.confirm");
-            tools.button(Icon.cancel, Styles.clearNonei, this::cancelPaste).size(44f).visible(() -> paste != null).tooltip("@canvas.cancel");
+            toolsPanel = tools;
+            rebuildTools();
         }).colspan(3).left().row();
 
         cont.table(Tex.pane, body -> {
+            bodyPanel = body;
             body.center();
 
             //canvas element centered; tools panel is separate
@@ -138,6 +132,7 @@ public class CanvasEditDialog extends BaseDialog{
 
                         @Override
                         public boolean touchDown(InputEvent event, float ex, float ey, int pointer, KeyCode button){
+                            if(layoutEditing) return false;
                             int cx = convertX(ex), cy = convertY(ey);
 
                             if(button == KeyCode.mouseLeft){
@@ -286,6 +281,7 @@ public class CanvasEditDialog extends BaseDialog{
             body.add().width(8f);
 
             body.table(Tex.button, right -> {
+                controlsPanel = right;
                 right.defaults().left().pad(6f);
 
                 //color preview circle (clickable)
@@ -303,7 +299,9 @@ public class CanvasEditDialog extends BaseDialog{
                 };
 
                 preview.touchable = Touchable.enabled;
-                preview.clicked(() -> ui.picker.show(Tmp.c1.set(current), true, c -> setColor(c.rgba8888())));
+                preview.clicked(() -> {
+                    if(!layoutEditing) ui.picker.show(Tmp.c1.set(current), true, c -> setColor(c.rgba8888()));
+                });
 
                 var pick = new Table();
                 pick.add(preview).size(44f);
@@ -328,7 +326,7 @@ public class CanvasEditDialog extends BaseDialog{
                 }).get();
                 right.row();
 
-                right.button("@pickcolor", Icon.pencil, () -> ui.picker.show(Tmp.c1.set(current), true, c -> setColor(c.rgba8888()))).colspan(2).growX();
+                right.button("@pickcolor", Icon.pencil, () -> ui.picker.show(Tmp.c1.set(current), true, c -> setColor(c.rgba8888()))).disabled(b -> layoutEditing).colspan(2).growX();
                 right.row();
 
                 //RGBA sliders
@@ -369,11 +367,15 @@ public class CanvasEditDialog extends BaseDialog{
         cont.row();
 
         cont.table(Tex.button, t -> {
-            t.button(Icon.grid, Styles.clearNoneTogglei, () -> grid = !grid).checked(grid).size(44f);
+            gridPanel = t;
+            t.defaults().size(44f);
+            t.button(Icon.grid, Styles.clearNoneTogglei, () -> grid = !grid).checked(grid).disabled(b -> layoutEditing).row();
+            t.button(Icon.edit, Styles.clearNoneTogglei, this::beginLayoutEdit).checked(b -> layoutEditing).tooltip("@canvas.layoutedit");
         });
 
         // Palette with persistent custom colors.
         cont.table(Tex.button, p -> {
+            palettePanel = p;
             Runnable[] rebuild = {null};
             rebuild[0] = () -> {
                 p.clearChildren();
@@ -393,12 +395,12 @@ public class CanvasEditDialog extends BaseDialog{
                             Core.settings.putJson(customPaletteKey, Integer.class, customPalette);
                         }
                         rebuild[0].run();
-                    }).tooltip("@add");
+                    }).disabled(b -> layoutEditing).tooltip("@add");
 
                     // toggle delete mode for custom colors
                     bar.button(Icon.trash, Styles.clearNoneTogglei, () -> {
                         deletePaletteMode = !deletePaletteMode;
-                    }).checked(b -> deletePaletteMode).tooltip("@save.delete");
+                    }).checked(b -> deletePaletteMode).disabled(b -> layoutEditing).tooltip("@save.delete");
                 }).growX().left().row();
 
                 int cols = 12;
@@ -410,7 +412,7 @@ public class CanvasEditDialog extends BaseDialog{
                     int rgba = block.palette[i];
                     ImageButton button = p.button(Tex.whiteui, Styles.squareTogglei, 30f, () -> {
                         setColor(rgba);
-                    }).size(44f).checked(b -> curColor == rgba).get();
+                    }).size(44f).checked(b -> curColor == rgba).disabled(b -> layoutEditing).get();
                     button.getStyle().imageUpColor = new Color(rgba);
                     idx++;
                 }
@@ -427,7 +429,7 @@ public class CanvasEditDialog extends BaseDialog{
                         }else{
                             setColor(rgba);
                         }
-                    }).size(44f).checked(b -> curColor == rgba).get();
+                    }).size(44f).checked(b -> curColor == rgba).disabled(b -> layoutEditing).get();
                     button.getStyle().imageUpColor = new Color(rgba);
                     idx++;
                 }
@@ -437,6 +439,234 @@ public class CanvasEditDialog extends BaseDialog{
         });
 
         buttons.defaults().size(150f, 64f);
+        installLayoutDraggers();
+        applyLayout();
+    }
+
+    void rebuildTools(){
+        if(toolsPanel == null) return;
+        toolsPanel.clearChildren();
+        toolsPanel.defaults().size(44f).padRight(toolsVertical ? 0f : 4f).padBottom(toolsVertical ? 4f : 0f);
+
+        addToolButton(Icon.pencil, () -> selectTool(CanvasTool.brush), b -> tool == CanvasTool.brush, "@canvas.brush");
+        addToolButton(Icon.fill, () -> selectTool(CanvasTool.fill), b -> tool == CanvasTool.fill, "@canvas.fill");
+        addToolButton(Icon.right, () -> selectTool(CanvasTool.line), b -> tool == CanvasTool.line, "@canvas.line");
+        addToolButton(Icon.box, () -> selectTool(CanvasTool.rect), b -> tool == CanvasTool.rect, "@canvas.rect");
+        addToolButton(Icon.box, () -> selectTool(CanvasTool.rectFill), b -> tool == CanvasTool.rectFill, "@canvas.rectfill");
+        addToolButton(Icon.commandRally, () -> selectTool(CanvasTool.circle), b -> tool == CanvasTool.circle, "@canvas.circle");
+        addToolButton(Icon.commandRally, () -> selectTool(CanvasTool.circleFill), b -> tool == CanvasTool.circleFill, "@canvas.circlefill");
+        addToolButton(Icon.copy, () -> selectTool(CanvasTool.copy), b -> tool == CanvasTool.copy, "@canvas.copy");
+        toolsPanel.button(Icon.paste, Styles.clearNoneTogglei, this::startPaste).checked(b -> tool == CanvasTool.paste).disabled(b -> layoutEditing || clipboard == null).tooltip("@canvas.paste");
+        nextToolCell();
+        toolsPanel.button(Icon.undo, Styles.clearNonei, this::undo).disabled(b -> layoutEditing || undoStack.isEmpty()).tooltip("@canvas.undo");
+        nextToolCell();
+        toolsPanel.button(Icon.redo, Styles.clearNonei, this::redo).disabled(b -> layoutEditing || redoStack.isEmpty()).tooltip("@canvas.redo");
+        nextToolCell();
+        toolsPanel.button(Icon.ok, Styles.clearNonei, this::confirmPaste).visible(() -> paste != null).disabled(b -> layoutEditing).tooltip("@canvas.confirm");
+        nextToolCell();
+        toolsPanel.button(Icon.cancel, Styles.clearNonei, this::cancelPaste).visible(() -> paste != null).disabled(b -> layoutEditing).tooltip("@canvas.cancel");
+        nextToolCell();
+
+        toolsPanel.button(Icon.move, Styles.clearNonei, () -> {
+            toolsVertical = !toolsVertical;
+            rebuildTools();
+        }).visible(() -> layoutEditing).tooltip("@edit");
+    }
+
+    void addToolButton(Drawable icon, Runnable clicked, Boolf<ImageButton> checked, String tooltip){
+        toolsPanel.button(icon, Styles.clearNoneTogglei, clicked).checked(checked).disabled(b -> layoutEditing).tooltip(tooltip);
+        nextToolCell();
+    }
+
+    void nextToolCell(){
+        if(toolsVertical) toolsPanel.row();
+    }
+
+    void rebuildButtons(){
+        buttons.clearChildren();
+        buttons.defaults().size(150f, 64f);
+        if(layoutEditing){
+            buttons.button("@save", Icon.save, this::saveLayoutEdit);
+            buttons.button("@cancel", Icon.cancel, this::cancelLayoutEdit);
+            buttons.row();
+            buttons.button("@settings.resetKey", Icon.refresh, this::resetLayout).colspan(2).growX();
+        }else{
+            buttons.button("@back", Icon.left, this::hide);
+            buttons.button("@import", Icon.image, () -> platform.showFileChooser(true, "png", this::importFrom));
+            buttons.button("@export", Icon.export, () -> platform.showFileChooser(false, "png", this::exportTo));
+        }
+    }
+
+    void beginLayoutEdit(){
+        if(layoutEditing) return;
+        saveOldLayout();
+        layoutEditing = true;
+        cancelPaste();
+        rebuildButtons();
+        rebuildTools();
+    }
+
+    void saveLayoutEdit(){
+        layoutEditing = false;
+        saveLayout();
+        rebuildButtons();
+        rebuildTools();
+    }
+
+    void cancelLayoutEdit(){
+        toolsX = oldToolsX;
+        toolsY = oldToolsY;
+        bodyX = oldBodyX;
+        bodyY = oldBodyY;
+        controlsX = oldControlsX;
+        controlsY = oldControlsY;
+        gridX = oldGridX;
+        gridY = oldGridY;
+        paletteX = oldPaletteX;
+        paletteY = oldPaletteY;
+        toolsVertical = oldToolsVertical;
+        layoutEditing = false;
+        applyLayout();
+        rebuildButtons();
+        rebuildTools();
+    }
+
+    void resetLayout(){
+        toolsX = toolsY = bodyX = bodyY = controlsX = controlsY = gridX = gridY = paletteX = paletteY = 0f;
+        toolsVertical = false;
+        applyLayout();
+        rebuildTools();
+    }
+
+    void saveOldLayout(){
+        oldToolsX = toolsX;
+        oldToolsY = toolsY;
+        oldBodyX = bodyX;
+        oldBodyY = bodyY;
+        oldControlsX = controlsX;
+        oldControlsY = controlsY;
+        oldGridX = gridX;
+        oldGridY = gridY;
+        oldPaletteX = paletteX;
+        oldPaletteY = paletteY;
+        oldToolsVertical = toolsVertical;
+    }
+
+    void loadLayout(){
+        toolsX = Core.settings.getFloat(layoutKey + "-tools-x", 0f);
+        toolsY = Core.settings.getFloat(layoutKey + "-tools-y", 0f);
+        bodyX = Core.settings.getFloat(layoutKey + "-body-x", 0f);
+        bodyY = Core.settings.getFloat(layoutKey + "-body-y", 0f);
+        controlsX = Core.settings.getFloat(layoutKey + "-controls-x", 0f);
+        controlsY = Core.settings.getFloat(layoutKey + "-controls-y", 0f);
+        gridX = Core.settings.getFloat(layoutKey + "-grid-x", 0f);
+        gridY = Core.settings.getFloat(layoutKey + "-grid-y", 0f);
+        paletteX = Core.settings.getFloat(layoutKey + "-palette-x", 0f);
+        paletteY = Core.settings.getFloat(layoutKey + "-palette-y", 0f);
+        toolsVertical = Core.settings.getBool(layoutKey + "-tools-vertical", false);
+    }
+
+    void saveLayout(){
+        Core.settings.put(layoutKey + "-tools-x", toolsX);
+        Core.settings.put(layoutKey + "-tools-y", toolsY);
+        Core.settings.put(layoutKey + "-body-x", bodyX);
+        Core.settings.put(layoutKey + "-body-y", bodyY);
+        Core.settings.put(layoutKey + "-controls-x", controlsX);
+        Core.settings.put(layoutKey + "-controls-y", controlsY);
+        Core.settings.put(layoutKey + "-grid-x", gridX);
+        Core.settings.put(layoutKey + "-grid-y", gridY);
+        Core.settings.put(layoutKey + "-palette-x", paletteX);
+        Core.settings.put(layoutKey + "-palette-y", paletteY);
+        Core.settings.put(layoutKey + "-tools-vertical", toolsVertical);
+        Core.settings.manualSave();
+    }
+
+    void installLayoutDraggers(){
+        installLayoutDragger(toolsPanel, "tools");
+        installLayoutDragger(bodyPanel, "body");
+        installLayoutDragger(controlsPanel, "controls");
+        installLayoutDragger(gridPanel, "grid");
+        installLayoutDragger(palettePanel, "palette");
+    }
+
+    void installLayoutDragger(Table table, String name){
+        if(table == null) return;
+        table.addListener(new InputListener(){
+            float lastx, lasty;
+
+            @Override
+            public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
+                if(!layoutEditing || button != KeyCode.mouseLeft) return false;
+                Vec2 v = table.localToParentCoordinates(Tmp.v1.set(x, y));
+                lastx = v.x;
+                lasty = v.y;
+                table.toFront();
+                event.stop();
+                return true;
+            }
+
+            @Override
+            public void touchDragged(InputEvent event, float x, float y, int pointer){
+                Vec2 v = table.localToParentCoordinates(Tmp.v1.set(x, y));
+                moveLayoutPanel(name, v.x - lastx, v.y - lasty);
+                lastx = v.x;
+                lasty = v.y;
+                event.stop();
+            }
+        });
+    }
+
+    void moveLayoutPanel(String name, float dx, float dy){
+        switch(name){
+            case "tools" -> {
+                toolsX += dx;
+                toolsY += dy;
+            }
+            case "body" -> {
+                bodyX += dx;
+                bodyY += dy;
+            }
+            case "controls" -> {
+                controlsX += dx;
+                controlsY += dy;
+            }
+            case "grid" -> {
+                gridX += dx;
+                gridY += dy;
+            }
+            case "palette" -> {
+                paletteX += dx;
+                paletteY += dy;
+            }
+        }
+        applyLayout();
+    }
+
+    void applyLayout(){
+        setPanelTranslation(toolsPanel, toolsX, toolsY);
+        setPanelTranslation(bodyPanel, bodyX, bodyY);
+        setPanelTranslation(controlsPanel, controlsX, controlsY);
+        setPanelTranslation(gridPanel, gridX, gridY);
+        setPanelTranslation(palettePanel, paletteX, paletteY);
+    }
+
+    void setPanelTranslation(@Nullable Element element, float x, float y){
+        if(element != null) element.setTranslation(x, y);
+    }
+
+    @Override
+    public void draw(){
+        if(layoutEditing){
+            Draw.color(1f, 0.85f, 0.15f, 0.22f);
+            Lines.stroke(Scl.scl(6f));
+            float spacing = Scl.scl(42f), offset = (Time.time * Scl.scl(0.7f)) % spacing;
+            float w = Core.graphics.getWidth(), h = Core.graphics.getHeight();
+            for(float x = -h; x < w + h; x += spacing){
+                Lines.line(x + offset, 0f, x + h + offset, h);
+            }
+            Draw.reset();
+        }
+        super.draw();
     }
 
     void exportTo(Fi file){

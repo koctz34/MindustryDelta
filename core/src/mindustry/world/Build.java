@@ -64,6 +64,10 @@ public class Build{
         }
 
         Events.fire(new BlockBuildBeginEvent(tile, team, unit, true));
+
+        if(state.rules.instantBuild && !net.client()){
+            build.deconstruct(unit, team.core(), 1f);
+        }
     }
 
     /** Places a ConstructBlock at this location. To preserve bandwidth, a config is only passed in the case of instant-place blocks. */
@@ -157,6 +161,10 @@ public class Build{
         Events.fire(new BlockBuildBeginEvent(tile, team, unit, false));
 
         result.placeBegan(tile, previous, unit);
+
+        if(state.rules.instantBuild && !net.client() && tile.build == build){
+            build.construct(unit, team.core(), 1f, placeConfig);
+        }
     }
 
     /** @return whether a tile can be placed at this location by this team. */

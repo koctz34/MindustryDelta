@@ -305,7 +305,7 @@ public class ConstructBlock extends Block{
 
             progress = Mathf.clamp(progress + maxProgress);
 
-            if(progress >= 1f || state.rules.infiniteResources){
+            if(progress >= 1f || state.rules.infiniteResources || state.rules.instantBuild){
                 boolean canFinish = true;
 
                 //look at leftover resources to consume, get them from the core if necessary, delay building if not
@@ -379,7 +379,7 @@ public class ConstructBlock extends Block{
 
             progress = Mathf.clamp(progress - amount);
 
-            if(progress <= current.deconstructThreshold || state.rules.infiniteResources){
+            if(progress <= current.deconstructThreshold || state.rules.infiniteResources || state.rules.instantBuild){
                 //add any leftover items that weren't obtained due to rounding errors
                 if(core != null && !state.rules.infiniteResources){
                     for(int i = 0; i < itemsLeft.length; i++){
