@@ -1,6 +1,7 @@
 package mindustry.ui.news;
 
 import arc.*;
+import arc.files.*;
 import arc.func.*;
 import arc.graphics.*;
 import arc.graphics.Texture.*;
@@ -17,8 +18,10 @@ import static mindustry.Vars.*;
 /** Fetches news from independent RSS feeds (Russian language). */
 public class NewsService{
     private static final Json cacheJson = new Json();
-    private static final String cacheKey = "delta-news-cache-v3";
-    private static final String cacheTimeKey = "delta-news-cache-time";
+    /** Legacy settings keys; kept only for one-time migration. */
+    private static final String legacyCacheKey = "delta-news-cache-v3";
+    private static final String legacyCacheTimeKey = "delta-news-cache-time";
+    private static final String cacheFileName = "delta_news_cache.json";
     private static final long cacheDuration = 1000L * 60 * 30; //30 min
     private static final int listLimit = 24;
     private static final int previewLimit = 3;
@@ -41,38 +44,100 @@ public class NewsService{
     public boolean loaded;
     public @Nullable String lastError;
 
+    private static Fi cacheFile(){
+        return dataDirectory.child(cacheFileName);
+    }
+
     public void loadCache(){
         items.clear();
-        String data = Core.settings.getString(cacheKey, "");
-        if(data.isEmpty()) return;
+        long cacheTime = 0L;
+        boolean migratedLegacy = false;
 
-        try{
-            StoredNews[] stored = cacheJson.fromJson(StoredNews[].class, data);
-            if(stored == null) return;
-            for(StoredNews s : stored){
-                items.add(s.toItem());
+        if(cacheFile().exists()){
+            try{
+                NewsCacheData cache = cacheJson.fromJson(NewsCacheData.class, cacheFile().readString());
+                if(cache != null && cache.items != null){
+                    cacheTime = cache.time;
+                    for(StoredNews s : cache.items){
+                        items.add(s.toItem());
+                    }
+                }
+            }catch(Exception e){
+                Log.err(e);
             }
-            items.sort();
-            loaded = !items.isEmpty();
-        }catch(Exception e){
-            Log.err(e);
+        }
+
+        String legacy = Core.settings.getString(legacyCacheKey, "");
+        if(!legacy.isEmpty()){
+            try{
+                StoredNews[] stored = cacheJson.fromJson(StoredNews[].class, legacy);
+                if(stored != null){
+                    items.clear();
+                    for(StoredNews s : stored){
+                        items.add(s.toItem());
+                    }
+                    cacheTime = Core.settings.getLong(legacyCacheTimeKey, Time.millis());
+                    migratedLegacy = true;
+                }
+            }catch(Exception e){
+                Log.err(e);
+            }
+        }
+
+        items.sort();
+        loaded = !items.isEmpty();
+
+        if(migratedLegacy){
+            writeCacheFile(cacheTime);
+            clearLegacySettingsCache();
         }
     }
 
     public void saveCache(){
         if(items.isEmpty()) return;
+        writeCacheFile(Time.millis());
+    }
+
+    private void writeCacheFile(long time){
         int limit = Math.min(items.size, listLimit);
-        StoredNews[] stored = new StoredNews[limit];
+        NewsCacheData cache = new NewsCacheData();
+        cache.time = time;
+        cache.items = new StoredNews[limit];
         for(int i = 0; i < limit; i++){
-            stored[i] = StoredNews.from(items.get(i));
+            cache.items[i] = StoredNews.fromCache(items.get(i));
         }
-        Core.settings.put(cacheKey, cacheJson.toJson(stored, StoredNews[].class));
-        Core.settings.put(cacheTimeKey, Time.millis());
+        try{
+            cacheFile().writeString(cacheJson.toJson(cache));
+        }catch(Exception e){
+            Log.err(e);
+        }
+    }
+
+    private static void clearLegacySettingsCache(){
+        if(Core.settings.getString(legacyCacheKey, "").isEmpty()) return;
+        Core.settings.remove(legacyCacheKey);
+        Core.settings.remove(legacyCacheTimeKey);
+        try{
+            Core.settings.manualSave();
+        }catch(Throwable e){
+            Log.err(e);
+        }
     }
 
     public boolean shouldRefresh(){
         if(!loaded || items.isEmpty()) return true;
-        return Time.millis() - Core.settings.getLong(cacheTimeKey, 0L) > cacheDuration;
+        long cacheTime = readCacheTime();
+        return Time.millis() - cacheTime > cacheDuration;
+    }
+
+    private long readCacheTime(){
+        if(cacheFile().exists()){
+            try{
+                NewsCacheData cache = cacheJson.fromJson(NewsCacheData.class, cacheFile().readString());
+                if(cache != null) return cache.time;
+            }catch(Exception ignored){}
+        }
+        return Core.settings.getLong(legacyCacheTimeKey, 0L);
     }
 
     public Seq<NewsItem> filteredItems(){
@@ -423,15 +488,19 @@ public class NewsService{
         out.append(value);
     }
 
+    public static class NewsCacheData{
+        public long time;
+        public StoredNews[] items;
+    }
+
     public static class StoredNews{
         public String title, summary, fullContent, link, imageUrl, source;
         public long pubDate;
 
-        static StoredNews from(NewsItem item){
+        static StoredNews fromCache(NewsItem item){
             StoredNews s = new StoredNews();
             s.title = item.title;
             s.summary = item.summary;
-            s.fullContent = item.fullContent;
             s.link = item.link;
             s.imageUrl = item.imageUrl;
             s.source = item.source;

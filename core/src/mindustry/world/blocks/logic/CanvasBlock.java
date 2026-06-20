@@ -16,6 +16,8 @@ import mindustry.ui.*;
 import mindustry.ui.dialogs.*;
 import mindustry.world.*;
 
+import java.util.Arrays;
+
 import static mindustry.Vars.*;
 
 public class CanvasBlock extends Block{
@@ -56,6 +58,9 @@ public class CanvasBlock extends Block{
 
             // legacy indexed payload
             if(bytes.length == legacyIndexedLength()){
+                // On vanilla servers, skip when the echoed legacy matches our local truecolor snapshot
+                // so custom colors are not wiped after save.
+                if(trueColor && net.client() && !netClient.deltaServer && Arrays.equals(bytes, build.legacyBytes())) return;
                 build.loadLegacy(bytes);
             }
         });

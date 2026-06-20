@@ -766,12 +766,18 @@ public class CanvasEditDialog extends BaseDialog{
                 // while waiting for the server echo ("delta-canvas-true").
                 canvas.applyTrueColor(rgba);
 
+                // Always send truecolor — Delta servers handle this; vanilla servers ignore it.
                 var stream = new arc.util.io.ReusableByteOutStream();
                 var writes = new arc.util.io.Writes(new java.io.DataOutputStream(stream));
                 writes.i(canvas.pos());
                 writes.i(rgba.length);
                 writes.b(rgba);
                 Call.serverBinaryPacketReliable("delta-canvas", stream.toByteArray());
+
+                if(!netClient.deltaServer){
+                    // Vanilla servers only understand legacy indexed canvas config.
+                    Call.tileConfig(player, canvas, canvas.legacyBytesPublic());
+                }
             }else if(net.server()){
                 // Host is editing – apply locally and split broadcast: legacy for vanilla, truecolor for delta.
                 canvas.applyTrueColor(rgba);

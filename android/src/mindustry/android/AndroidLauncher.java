@@ -220,44 +220,77 @@ public class AndroidLauncher extends AndroidApplication{
         }});
         checkFiles(getIntent());
 
+        setupAndroidDataDirectory();
+    }
+
+    /** Picks a writable settings/saves directory; falls back to internal storage if external is unavailable. */
+    void setupAndroidDataDirectory(){
+        Fi data = null;
+
         try{
-            //new external folder
-            Fi data = Core.files.absolute(((Context)this).getExternalFilesDir(null).getAbsolutePath());
-            Core.settings.setDataDirectory(data);
+            File external = getExternalFilesDir(null);
+            if(external != null){
+                data = tryWritableDataDir(Core.files.absolute(external.getAbsolutePath()));
+            }
+        }catch(Throwable t){
+            Log.err("Failed to use external storage", t);
+        }
 
-            //delete unused cache folder to free up space
+        if(data == null){
             try{
-                Fi cache = Core.settings.getDataDirectory().child("cache");
-                if(cache.exists()){
-                    cache.deleteDirectory();
-                }
+                data = tryWritableDataDir(Core.files.absolute(getFilesDir().getAbsolutePath()));
             }catch(Throwable t){
-                Log.err("Failed to delete cached folder", t);
+                Log.err("Failed to use internal storage", t);
             }
+        }
 
+        if(data == null){
+            Log.err("No writable Android data directory found; settings may not persist.");
+            return;
+        }
 
-            //move to internal storage if there's no file indicating that it moved
-            if(!Core.files.local("files_moved").exists()){
-                Log.info("Moving files to external storage...");
+        Core.settings.setDataDirectory(data);
+        Log.info("Using Android data directory: @", data);
 
-                try{
-                    //current local storage folder
-                    Fi src = Core.files.absolute(Core.files.getLocalStoragePath());
-                    for(Fi fi : src.list()){
-                        fi.copyTo(data);
-                    }
-                    //create marker
-                    Core.files.local("files_moved").writeString("files moved to " + data);
-                    Core.files.local("files_moved_103").writeString("files moved again");
-                    Log.info("Files moved.");
-                }catch(Throwable t){
-                    Log.err("Failed to move files!");
-                    t.printStackTrace();
+        //delete unused cache folder to free up space
+        try{
+            Fi cache = Core.settings.getDataDirectory().child("cache");
+            if(cache.exists()){
+                cache.deleteDirectory();
+            }
+        }catch(Throwable t){
+            Log.err("Failed to delete cached folder", t);
+        }
+
+        //move to external/internal storage if there's no file indicating that it moved
+        if(!Core.files.local("files_moved").exists()){
+            Log.info("Moving files to app storage...");
+
+            try{
+                Fi src = Core.files.absolute(Core.files.getLocalStoragePath());
+                for(Fi fi : src.list()){
+                    fi.copyTo(data);
                 }
+                Core.files.local("files_moved").writeString("files moved to " + data);
+                Core.files.local("files_moved_103").writeString("files moved again");
+                Log.info("Files moved.");
+            }catch(Throwable t){
+                Log.err("Failed to move files!", t);
             }
-        }catch(Exception e){
-            //print log but don't crash
-            Log.err(e);
+        }
+    }
+
+    static Fi tryWritableDataDir(Fi dir){
+        if(dir == null) return null;
+        try{
+            if(!dir.exists()) dir.mkdirs();
+            Fi probe = dir.child(".write_test");
+            probe.writeString("ok");
+            probe.delete();
+            return dir;
+        }catch(Throwable t){
+            Log.err("Data directory is not writable: @", dir, t);
+            return null;
         }
     }
 

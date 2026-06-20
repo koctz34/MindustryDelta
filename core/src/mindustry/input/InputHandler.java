@@ -40,6 +40,7 @@ import mindustry.world.blocks.ConstructBlock.*;
 import mindustry.world.blocks.*;
 import mindustry.world.blocks.distribution.*;
 import mindustry.world.blocks.payloads.*;
+import mindustry.world.blocks.logic.CanvasBlock;
 import mindustry.world.blocks.storage.*;
 import mindustry.world.meta.*;
 
@@ -700,6 +701,13 @@ public abstract class InputHandler implements InputProcessor, GestureListener{
     public static void tileConfig(@Nullable Player player, Building build, @Nullable Object value){
         if(build == null && net.server()) throw new ValidateException(player, "building is null");
         if(build == null) return;
+
+        // Delta clients sync canvas truecolor via delta-canvas; legacy config would quantize colors.
+        if(net.server() && player != null && player.con != null && player.con.deltaClient
+        && value instanceof byte[] bytes && build.block instanceof CanvasBlock block
+        && block.trueColor && bytes.length != block.canvasSize * block.canvasSize * 4){
+            return;
+        }
 
         if(net.server() && (!Units.canInteract(player, build) ||
         !netServer.admins.allowAction(player, ActionType.configure, build.tile, action -> action.config = value))){

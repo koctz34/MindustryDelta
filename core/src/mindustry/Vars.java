@@ -496,6 +496,8 @@ public class Vars implements Loadable{
             settings.setDataDirectory(Core.files.local("saves/"));
         }
 
+        SettingsRecovery.prepare();
+
         //needed to make sure binding values are correct
         Vars.android = app.isAndroid();
         settings.defaults("locale", "default", "blocksync", true);

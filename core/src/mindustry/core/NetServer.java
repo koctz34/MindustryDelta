@@ -154,6 +154,7 @@ public class NetServer implements ApplicationListener{
         addBinaryPacketHandler("delta-hello", (player, contents) -> {
             if(player != null && player.con != null){
                 player.con.deltaClient = true;
+                Call.clientBinaryPacketReliable(player.con, "delta-hello", contents == null ? new byte[]{1} : contents);
             }
         });
 

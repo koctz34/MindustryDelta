@@ -49,6 +49,8 @@ public class NetClient implements ApplicationListener{
     //private Interval timer = new Interval(5);
     /** Whether the client is currently connecting. */
     private boolean connecting = false;
+    /** True after the connected server acknowledges DELTA extensions (delta-hello). */
+    public boolean deltaServer = false;
     /** If true, no message will be shown on disconnect. */
     private boolean quiet = false;
     /** Whether to suppress disconnect events completely.*/
@@ -121,8 +123,12 @@ public class NetClient implements ApplicationListener{
             net.send(c, true);
         });
 
+        // DELTA handshake ack from server.
+        addBinaryPacketHandler("delta-hello", contents -> deltaServer = true);
+
         // DELTA-only truecolor canvas updates come via vanilla binary packet channel.
         addBinaryPacketHandler("delta-canvas-true", contents -> {
+            deltaServer = true;
             try{
                 var read = new arc.util.io.Reads(new java.io.DataInputStream(new java.io.ByteArrayInputStream(contents)));
                 int pos = read.i();
@@ -673,6 +679,7 @@ public class NetClient implements ApplicationListener{
         quiet = false;
         lastSent = 0;
         lastSnapshotTimestamp = 0;
+        deltaServer = false;
 
         Groups.clear();
         ui.chatfrag.clearMessages();

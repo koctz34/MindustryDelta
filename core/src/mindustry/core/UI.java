@@ -2,6 +2,7 @@ package mindustry.core;
 
 import arc.*;
 import arc.Graphics.*;
+import arc.files.*;
 import arc.Input.*;
 import arc.assets.*;
 import arc.func.*;
@@ -29,6 +30,7 @@ import mindustry.mod.*;
 import mindustry.ui.*;
 import mindustry.ui.dialogs.*;
 import mindustry.ui.fragments.*;
+import mindustry.io.*;
 import mindustry.ui.news.*;
 
 import static arc.scene.actions.Actions.*;
@@ -140,10 +142,7 @@ public class UI implements ApplicationListener, Loadable{
             Tooltips.getInstance().offsetY += Scl.scl(60f);
         }
 
-        Core.settings.setErrorHandler(e -> {
-            Log.err(e);
-            Core.app.post(() -> showErrorMessage("Failed to access local storage.\nSettings will not be saved."));
-        });
+        SettingsRecovery.installErrorHandler();
 
         ClickListener.clicked = () -> Sounds.uiButton.play();
 
@@ -839,4 +838,5 @@ public class UI implements ApplicationListener, Loadable{
             return number;
         }
     }
+
 }
