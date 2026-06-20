@@ -13,8 +13,8 @@ Key changes from the standard version of Mindustry:
   - Client synchronization with vanilla clients
 - Down restrictions:
   - Map size unlimited
-  - Schematic size unlimited
   - Max schematic size now 512
+  - instantBuild now working on delta-servers
 - World news in main menu
 
 [![Discord](https://img.shields.io/discord/1093602299944894474?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/p2rscmatx9)
