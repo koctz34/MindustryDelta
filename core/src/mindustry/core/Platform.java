@@ -2,6 +2,7 @@ package mindustry.core;
 
 import arc.*;
 import arc.files.*;
+import arc.func.*;
 import arc.math.*;
 import arc.struct.*;
 import arc.util.serialization.*;
@@ -9,6 +10,7 @@ import mindustry.mod.*;
 import mindustry.net.*;
 import mindustry.net.Net.*;
 import mindustry.type.*;
+import mindustry.ui.*;
 import mindustry.ui.FileChooser.*;
 import rhino.*;
 
@@ -106,6 +108,38 @@ public interface Platform{
     default void showFileChooser(FileChooserParams params){
         throw new IllegalArgumentException("Not implemented on this platform!");
     }
+
+    //region legacy mod-compatibility file chooser API; delegates to the new FileChooser builder
+
+    /** @deprecated kept for mod compatibility; use {@link mindustry.ui.FileChooser}. */
+    @Deprecated
+    default void showFileChooser(boolean open, String title, String extension, Cons<Fi> cons){
+        (open ? FileChooser.open(extension) : FileChooser.save(extension)).title(title).submit(cons);
+    }
+
+    /** @deprecated kept for mod compatibility; use {@link mindustry.ui.FileChooser}. */
+    @Deprecated
+    default void showFileChooser(boolean open, String extension, Cons<Fi> cons){
+        showFileChooser(open, open ? "@open" : "@save", extension, cons);
+    }
+
+    /** @deprecated kept for mod compatibility; use {@link mindustry.ui.FileChooser}. */
+    @Deprecated
+    default void showMultiFileChooser(Cons<Fi> cons, String... extensions){
+        FileChooser.open(extensions).submitMulti(files -> {
+            for(Fi file : files){
+                cons.get(file);
+            }
+        });
+    }
+
+    /** @deprecated kept for mod compatibility; use {@link mindustry.ui.FileChooser#export}. */
+    @Deprecated
+    default void export(String name, String extension, FileWriter writer){
+        FileChooser.export(name, extension, writer);
+    }
+
+    //endregion
 
     /** Hide the app. Android only. */
     default void hide(){

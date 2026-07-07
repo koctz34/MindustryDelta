@@ -1512,7 +1512,8 @@ public class Mods implements Loadable{
     }
 
     public static class ModResolutionContext{
-        public final ObjectMap<String, Seq<ModDependency>> dependencies = new ObjectMap<>();
+        //ordered map so independent mods keep the (alphabetical) input order instead of arc's hash-iteration order, which changes between arc versions and would otherwise reorder mod content/blocks
+        public final OrderedMap<String, Seq<ModDependency>> dependencies = new OrderedMap<>();
         public final ObjectSet<String> visited = new ObjectSet<>();
         public final OrderedSet<String> ordered = new OrderedSet<>();
         public final ObjectMap<String, ModState> invalid = new OrderedMap<>();

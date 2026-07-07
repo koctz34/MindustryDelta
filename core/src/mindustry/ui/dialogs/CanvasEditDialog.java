@@ -564,8 +564,8 @@ public class CanvasEditDialog extends BaseDialog{
             buttons.button("@settings.resetKey", Icon.refresh, this::resetLayout).colspan(2).growX();
         }else{
             buttons.button("@back", Icon.left, this::hide);
-            buttons.button("@import", Icon.image, () -> platform.showFileChooser(true, "png", this::importFrom));
-            buttons.button("@export", Icon.export, () -> platform.showFileChooser(false, "png", this::exportTo));
+            buttons.button("@import", Icon.image, () -> FileChooser.open("png").submit(this::importFrom));
+            buttons.button("@export", Icon.export, () -> FileChooser.export("canvas", "png", this::exportTo));
         }
     }
 

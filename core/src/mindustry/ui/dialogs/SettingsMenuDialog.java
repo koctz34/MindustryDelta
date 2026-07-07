@@ -37,6 +37,7 @@ public class SettingsMenuDialog extends BaseDialog{
     public SettingsTable graphics;
     public SettingsTable game;
     public SettingsTable sound;
+    public SettingsTable dev;
     public SettingsTable main;
 
     private Table prefs;
@@ -64,6 +65,7 @@ public class SettingsMenuDialog extends BaseDialog{
                 graphics.rebuild();
                 sound.rebuild();
                 game.rebuild();
+                dev.rebuild();
                 updateScrollFocus();
                 lastRebuildSize[0] = Core.graphics.getWidth();
                 lastRebuildSize[1] = Core.graphics.getHeight();
@@ -79,6 +81,7 @@ public class SettingsMenuDialog extends BaseDialog{
         game = new SettingsTable();
         graphics = new SettingsTable();
         sound = new SettingsTable();
+        dev = new SettingsTable();
 
         prefs = new Table();
         prefs.top();
@@ -249,33 +252,17 @@ public class SettingsMenuDialog extends BaseDialog{
 
             t.row();
 
-            t.button("@data.export", Icon.upload, style, () -> {
-                if(ios){
-                    Fi file = Core.files.local("mindustry-data-export.zip");
-                    try{
-                        exportData(file);
-                    }catch(Exception e){
-                        ui.showException(e);
-                    }
-                    platform.shareFile(file);
-                }else{
-                    platform.showFileChooser(false, "zip", file -> {
-                        try{
-                            exportData(file);
-                            ui.showInfo("@data.exported");
-                        }catch(Exception e){
-                            e.printStackTrace();
-                            ui.showException(e);
-                        }
-                    });
-                }
-            }).marginLeft(4);
+            t.button("@data.export", Icon.upload, style, () -> FileChooser.export("mindustry-data-export", "zip", file -> {
+                exportData(file);
+                ui.showInfo("@data.exported");
+            })).marginLeft(4);
 
             t.row();
 
-            t.button("@data.import", Icon.download, style, () -> ui.showConfirm("@confirm", "@data.import.confirm", () -> platform.showFileChooser(true, "zip", file -> {
+            t.button("@data.import", Icon.download, style, () -> ui.showConfirm("@confirm", "@data.import.confirm", () -> FileChooser.open("zip").submit(file -> {
                 try{
                     importData(file);
+                    mapPreviewDirectory.deleteDirectory();
                     control.saves.resetSave();
                     state = new GameState();
                     Core.app.exit();
@@ -307,13 +294,9 @@ public class SettingsMenuDialog extends BaseDialog{
                         logs.writeString(getLogs());
                         platform.shareFile(logs);
                     }else{
-                        platform.showFileChooser(false, "txt", file -> {
-                            try{
-                                file.writeBytes(getLogs().getBytes(Strings.utf8));
-                                app.post(() -> ui.showInfo("@crash.exported"));
-                            }catch(Throwable e){
-                                ui.showException(e);
-                            }
+                        FileChooser.export("logs", "txt", file -> {
+                            file.writeBytes(getLogs().getBytes(Strings.utf8));
+                            app.post(() -> ui.showInfo("@crash.exported"));
                         });
                     }
                 }
@@ -372,15 +355,16 @@ public class SettingsMenuDialog extends BaseDialog{
         menu.defaults().size(300f, 60f);
         menu.button("@settings.game", Icon.settings, style, isize, () -> visible(0)).marginLeft(marg).row();
         menu.button("@settings.graphics", Icon.image, style, isize, () -> visible(1)).marginLeft(marg).row();
-        menu.button("@settings.sound", Icon.filters, style, isize, () -> visible(2)).marginLeft(marg).row();
+        menu.button("@settings.sound", Icon.volumeUp, style, isize, () -> visible(2)).marginLeft(marg).row();
         menu.button("@settings.language", Icon.chat, style, isize, ui.language::show).marginLeft(marg).row();
         if(!mobile || Core.settings.getBool("keyboard")){
             menu.button("@settings.controls", Icon.move, style, isize, ui.controls::show).marginLeft(marg).row();
         }
 
         menu.button("@settings.data", Icon.save, style, isize, () -> dataDialog.show()).marginLeft(marg).row();
+        menu.button("@settings.dev", Icon.fileCode, style, isize, () -> visible(3)).marginLeft(marg).row();
 
-        int i = 3;
+        int i = 4;
         for(var cat : categories){
             int index = i;
             if(cat.icon == null){
@@ -443,10 +427,6 @@ public class SettingsMenuDialog extends BaseDialog{
         game.checkPref("doubletapmine", false);
         game.checkPref("commandmodehold", true);
 
-        if(!ios){
-            game.checkPref("modcrashdisable", true);
-        }
-
         if(steam){
             game.sliderPref("playerlimit", 16, 2, 32, i -> {
                 platform.updateLobby();
@@ -459,8 +439,6 @@ public class SettingsMenuDialog extends BaseDialog{
                 });
             }
         }
-
-        game.checkPref("console", false);
 
         Runnable newsSettingsChanged = () -> Core.app.post(() -> {
             if(ui.newsService != null) ui.newsService.onSettingsChanged();
@@ -614,6 +592,14 @@ public class SettingsMenuDialog extends BaseDialog{
         if(!mobile){
             Core.settings.put("swapdiagonal", false);
         }
+
+        dev.checkPref("console", false);
+        dev.checkPref("drawhitboxes", false);
+        dev.checkPref("showperformance", false);
+
+        if(!ios){
+            dev.checkPref("modcrashdisable", true);
+        }
     }
 
     public void exportData(Fi file) throws IOException{
@@ -623,6 +609,7 @@ public class SettingsMenuDialog extends BaseDialog{
         files.addAll(saveDirectory.list());
         files.addAll(modDirectory.list());
         files.addAll(schematicDirectory.list());
+        files.addAll(assetCacheDirectory.list()); //important for saves
         String base = Core.settings.getDataDirectory().path();
 
         //add directories
@@ -663,6 +650,9 @@ public class SettingsMenuDialog extends BaseDialog{
         //delete old saves so they don't interfere
         saveDirectory.deleteDirectory();
 
+        //clear old assets cache
+        assetCacheDirectory.deleteDirectory();
+
         //purge existing tmp data, keep everything else
         tmpDirectory.deleteDirectory();
 
@@ -685,7 +675,7 @@ public class SettingsMenuDialog extends BaseDialog{
         prefs.clearChildren();
 
         Seq<Table> tables = new Seq<>();
-        tables.addAll(game, graphics, sound);
+        tables.addAll(game, graphics, sound, dev);
         for(var custom : categories){
             tables.add(custom.table);
         }
