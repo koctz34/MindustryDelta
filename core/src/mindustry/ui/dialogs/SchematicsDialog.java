@@ -232,7 +232,7 @@ public class SchematicsDialog extends BaseDialog{
                 TextButtonStyle style = Styles.flatt;
                 t.defaults().size(280f, 60f).left();
                 t.row();
-                t.button("@import.clipboard", Icon.copy, style, () -> {
+                t.button("@load.clipboard", Icon.copy, style, () -> {
                     dialog.hide();
                     try{
                         Schematic s = Schematics.readBase64(Core.app.getClipboardText());
