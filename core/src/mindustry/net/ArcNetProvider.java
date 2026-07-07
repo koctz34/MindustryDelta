@@ -39,6 +39,7 @@ public class ArcNetProvider implements NetProvider{
 
     private static final LZ4SafeDecompressor decompressor = LZ4Factory.fastestInstance().safeDecompressor();
     private static final LZ4Compressor compressor = LZ4Factory.fastestInstance().fastCompressor();
+    private static final ThreadLocal<Seq<Connection>> writeConnections = Threads.local(Seq::new);
 
     private volatile int playerLimitCache, packetSpamLimit;
     private Ratekeeper clientUdpErrorRate = new Ratekeeper();
@@ -165,7 +166,7 @@ public class ArcNetProvider implements NetProvider{
                 if(packetSpamLimit > 0 && !k.packetRate.allow(3000, packetSpamLimit)){
                     Log.warn("Blacklisting IP '@' as potential DOS attack - packet spam.", k.address);
                     connection.close(DcReason.closed);
-                    netServer.admins.blacklistDos(k.address);
+                    k.blacklist();
                     return;
                 }
 
@@ -333,6 +334,49 @@ public class ArcNetProvider implements NetProvider{
     }
 
     @Override
+    public void sendAllServer(Object object, Iterable<NetConnection> connections, boolean reliable){
+        //build up list of underlying arcnet connections for faster bulk transfer
+        var cons = writeConnections.get();
+        cons.clear();
+        for(var con : connections){
+            if(con instanceof ArcConnection ac){
+                cons.add(ac.connection);
+            }
+        }
+
+        if(reliable){
+            server.sendToAllTCP(object, cons);
+        }else{
+            server.sendToAllUDP(object, cons);
+        }
+
+        cons.clear();
+    }
+
+    @Override
+    public void sendAllServer(Object object, boolean reliable){
+        if(reliable){
+            server.sendToAllTCP(object);
+        }else{
+            server.sendToAllUDP(object);
+        }
+    }
+
+    @Override
+    public void sendExceptServer(NetConnection except, Object object, boolean reliable){
+        if(!(except instanceof ArcConnection con)){
+            NetProvider.super.sendExceptServer(except, object, reliable);
+            return;
+        }
+
+        if(reliable){
+            server.sendToAllExceptTCP(con.connection.getID(), object);
+        }else{
+            server.sendToAllExceptUDP(con.connection.getID(), object);
+        }
+    }
+
+    @Override
     public void hostServer(int port) throws IOException{
         connections.clear();
         server.bind(port, port);
@@ -354,7 +398,7 @@ public class ArcNetProvider implements NetProvider{
         mainExecutor.submit(server::stop);
     }
 
-    class ArcConnection extends NetConnection{
+    public class ArcConnection extends NetConnection{
         public final Connection connection;
 
         long lastErrorTime;
@@ -367,6 +411,17 @@ public class ArcNetProvider implements NetProvider{
         @Override
         public boolean isConnected(){
             return connection.isConnected();
+        }
+
+        @Override
+        public void blacklist(){
+            //Blacklist TCP address
+            super.blacklist();
+            //Blacklist UDP address
+            var address = connection.getRemoteAddressUDP();
+            if(address != null){
+                netServer.admins.blacklistDos(address.getAddress().getHostAddress());
+            }
         }
 
         @Override
@@ -405,8 +460,7 @@ public class ArcNetProvider implements NetProvider{
                     }
                 }
             }catch(Exception e){
-                Log.err(e);
-                Log.info("Error sending packet. Disconnecting invalid client!");
+                Log.err("Error sending packet. Disconnecting invalid client!", e);
                 connection.close(DcReason.error);
 
                 if(connection.getArbitraryData() instanceof ArcConnection k){
