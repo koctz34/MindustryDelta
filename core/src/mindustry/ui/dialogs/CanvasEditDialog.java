@@ -40,8 +40,11 @@ public class CanvasEditDialog extends BaseDialog{
     Texture texture;
     Color current = new Color();
     TextField hexField;
-    Slider rSlider, gSlider, bSlider, aSlider, brushSlider;
-    int brush = 1;
+    Slider rSlider, gSlider, bSlider, aSlider, brushSlider, spraySlider;
+    int brush = 1, sprayFrequency = 10;
+    boolean spraying;
+    int lastSprayX, lastSprayY;
+    float sprayAccumulator;
     /** Prevents RGBA slider {@code moved()} from mixing stale channel values when sliders are set programmatically. */
     boolean syncingColorUi;
     boolean deletePaletteMode;
@@ -57,7 +60,7 @@ public class CanvasEditDialog extends BaseDialog{
     Table toolsPanel, bodyPanel, controlsPanel, gridPanel, palettePanel;
 
     enum CanvasTool{
-        brush, fill, line, rect, rectFill, circle, circleFill, copy, paste
+        brush, fill, colorFill, spray, line, rect, rectFill, circle, circleFill, copy, paste
     }
 
     static class PasteRegion{
@@ -101,6 +104,14 @@ public class CanvasEditDialog extends BaseDialog{
             if(time >= refreshTime){
                 save();
                 time = 0f;
+            }
+
+            if(spraying && tool == CanvasTool.spray && !layoutEditing){
+                sprayAccumulator += Time.delta * sprayFrequency;
+                while(sprayAccumulator >= 1f){
+                    sprayAt(lastSprayX, lastSprayY);
+                    sprayAccumulator -= 1f;
+                }
             }
         });
 
@@ -166,6 +177,18 @@ public class CanvasEditDialog extends BaseDialog{
                                     finishAction();
 
                                     return false;
+                                }else if(tool == CanvasTool.colorFill){
+                                    beginAction();
+                                    replaceColor(pix.get(cx, cy), curColor);
+                                    finishAction();
+                                    return false;
+                                }else if(tool == CanvasTool.spray){
+                                    beginAction();
+                                    spraying = true;
+                                    lastSprayX = cx;
+                                    lastSprayY = cy;
+                                    sprayAccumulator = 0f;
+                                    sprayAt(cx, cy);
                                 }else if(tool == CanvasTool.brush){
                                     beginAction();
                                     drawBrush(cx, cy);
@@ -190,7 +213,10 @@ public class CanvasEditDialog extends BaseDialog{
                                 movePaste(cx, cy);
                                 return;
                             }
-                            if(tool == CanvasTool.brush){
+                            if(tool == CanvasTool.spray && spraying){
+                                lastSprayX = cx;
+                                lastSprayY = cy;
+                            }else if(tool == CanvasTool.brush){
                                 Bresenham2.line(lastX, lastY, cx, cy, (x, y) -> drawBrush(x, y));
                                 lastX = cx;
                                 lastY = cy;
@@ -211,7 +237,10 @@ public class CanvasEditDialog extends BaseDialog{
                                 return;
                             }
 
-                            if(tool == CanvasTool.brush){
+                            if(tool == CanvasTool.spray && spraying){
+                                spraying = false;
+                                finishAction();
+                            }else if(tool == CanvasTool.brush){
                                 finishAction();
                             }else if(dragging){
                                 endX = cx;
@@ -277,6 +306,15 @@ public class CanvasEditDialog extends BaseDialog{
             };
 
             float canvasPx = mobile && !Core.graphics.isPortrait() ? Math.min(290f, Core.graphics.getHeight() / Scl.scl(1f) - 75f / Scl.scl(1f)) : 480f;
+
+            body.table(sprayWrap -> {
+                sprayWrap.defaults().pad(4f);
+                sprayWrap.add("@canvas.sprayfreq").padBottom(6f).row();
+                sprayWrap.add(spraySlider = new Slider(1f, 60f, 1f, true)).height(Math.max(120f, canvasPx - 24f)).width(32f);
+                spraySlider.setValue(sprayFrequency);
+                spraySlider.moved(v -> sprayFrequency = (int)v);
+            }).visible(() -> tool == CanvasTool.spray && !layoutEditing).padRight(6f);
+
             body.add(canvasElement).size(canvasPx);
             body.add().width(8f);
 
@@ -447,7 +485,7 @@ public class CanvasEditDialog extends BaseDialog{
         if(toolsPanel == null) return;
         toolsPanel.clearChildren();
         toolsPanel.defaults().size(44f).padRight(toolsVertical ? 0f : 4f).padBottom(toolsVertical ? 4f : 0f);
-
+        
         addToolButton(Icon.pencil, () -> selectTool(CanvasTool.brush), b -> tool == CanvasTool.brush, "@canvas.brush");
         addToolButton(Icon.fill, () -> selectTool(CanvasTool.fill), b -> tool == CanvasTool.fill, "@canvas.fill");
         addToolButton(Icon.right, () -> selectTool(CanvasTool.line), b -> tool == CanvasTool.line, "@canvas.line");
@@ -458,6 +496,8 @@ public class CanvasEditDialog extends BaseDialog{
         addToolButton(Icon.copy, () -> selectTool(CanvasTool.copy), b -> tool == CanvasTool.copy, "@canvas.copy");
         toolsPanel.button(Icon.paste, Styles.clearNoneTogglei, this::startPaste).checked(b -> tool == CanvasTool.paste).disabled(b -> layoutEditing || clipboard == null).tooltip("@canvas.paste");
         nextToolCell();
+        addToolButton(Icon.spray, () -> selectTool(CanvasTool.spray), b -> tool == CanvasTool.spray, "@canvas.spray");
+        addToolButton(Icon.refresh, () -> selectTool(CanvasTool.colorFill), b -> tool == CanvasTool.colorFill, "@canvas.colorfill");
         toolsPanel.button(Icon.undo, Styles.clearNonei, this::undo).disabled(b -> layoutEditing || undoStack.isEmpty()).tooltip("@canvas.undo");
         nextToolCell();
         toolsPanel.button(Icon.redo, Styles.clearNonei, this::redo).disabled(b -> layoutEditing || redoStack.isEmpty()).tooltip("@canvas.redo");
@@ -480,6 +520,38 @@ public class CanvasEditDialog extends BaseDialog{
 
     void nextToolCell(){
         if(toolsVertical) toolsPanel.row();
+    }
+
+    boolean shouldBlendBrush(){
+        return Core.input.shift() && current.a < 0.9999f;
+    }
+
+    int resolveBrushColor(int x, int y){
+        if(!pix.in(x, y)) return curColor;
+        return shouldBlendBrush() ? blendColors(pix.get(x, y), curColor) : curColor;
+    }
+
+    static int blendColors(int dst, int src){
+        Tmp.c1.set(src);
+        float sa = Tmp.c1.a;
+        if(sa <= 0f) return dst;
+        if(sa >= 1f) return src;
+
+        Tmp.c2.set(dst);
+        float da = Tmp.c2.a;
+        float outA = sa + da * (1f - sa);
+        if(outA <= 0.001f) return 0;
+
+        return Color.rgba8888(
+            (Tmp.c1.r * sa + Tmp.c2.r * da * (1f - sa)) / outA,
+            (Tmp.c1.g * sa + Tmp.c2.g * da * (1f - sa)) / outA,
+            (Tmp.c1.b * sa + Tmp.c2.b * da * (1f - sa)) / outA,
+            outA
+        );
+    }
+
+    boolean drawBrushPixel(int x, int y){
+        return drawPixel(x, y, resolveBrushColor(x, y));
     }
 
     void rebuildButtons(){
@@ -712,6 +784,7 @@ public class CanvasEditDialog extends BaseDialog{
 
     void selectTool(CanvasTool next){
         if(next != CanvasTool.paste) paste = null;
+        spraying = false;
         tool = next;
     }
 
@@ -798,7 +871,36 @@ public class CanvasEditDialog extends BaseDialog{
         for(int dx = -radius; dx <= radius; dx++){
             for(int dy = -radius; dy <= radius; dy++){
                 if(dx*dx + dy*dy > rr) continue;
-                drawPixel(x + dx, y + dy, curColor);
+                drawBrushPixel(x + dx, y + dy);
+            }
+        }
+    }
+
+    void sprayAt(int x, int y){
+        int radius = Math.max(0, brush - 1);
+        if(radius == 0){
+            drawBrushPixel(x, y);
+            return;
+        }
+
+        int rr = radius * radius;
+        for(int attempt = 0; attempt < radius * radius * 2; attempt++){
+            int dx = (int)(Mathf.random() * (radius * 2 + 1)) - radius;
+            int dy = (int)(Mathf.random() * (radius * 2 + 1)) - radius;
+            if(dx * dx + dy * dy <= rr){
+                drawBrushPixel(x + dx, y + dy);
+                return;
+            }
+        }
+    }
+
+    void replaceColor(int from, int to){
+        if(from == to && !shouldBlendBrush()) return;
+        for(int x = 0; x < pix.width; x++){
+            for(int y = 0; y < pix.height; y++){
+                if(pix.get(x, y) == from){
+                    drawPixel(x, y, shouldBlendBrush() ? blendColors(from, curColor) : to);
+                }
             }
         }
     }
@@ -821,7 +923,7 @@ public class CanvasEditDialog extends BaseDialog{
 
         for(int x = minx; x <= maxx; x++){
             for(int y = miny; y <= maxy; y++){
-                if(filled || x == minx || x == maxx || y == miny || y == maxy) drawPixel(x, y, curColor);
+                if(filled || x == minx || x == maxx || y == miny || y == maxy) drawBrushPixel(x, y);
             }
         }
     }
@@ -836,7 +938,7 @@ public class CanvasEditDialog extends BaseDialog{
             for(int y = miny; y <= maxy; y++){
                 float nx = (x + 0.5f - cx) / rx, ny = (y + 0.5f - cy) / ry;
                 float dst = nx * nx + ny * ny;
-                if(filled ? dst <= 1f : dst <= 1f && dst >= 0.72f) drawPixel(x, y, curColor);
+                if(filled ? dst <= 1f : dst <= 1f && dst >= 0.72f) drawBrushPixel(x, y);
             }
         }
     }

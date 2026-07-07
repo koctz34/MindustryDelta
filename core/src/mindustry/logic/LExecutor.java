@@ -70,6 +70,10 @@ public class LExecutor{
         Events.on(ResetEvent.class, e -> unitTimeouts.clear());
     }
 
+    static int textBufferLimit(LExecutor exec){
+        return exec.privileged ? Integer.MAX_VALUE : maxTextBuffer;
+    }
+
     public static void runLogicScript(@Nullable String code){
         runLogicScript(code, 100_000, false);
     }
@@ -1052,13 +1056,14 @@ public class LExecutor{
         @Override
         public void run(LExecutor exec){
 
-            if(exec.textBuffer.length() >= maxTextBuffer) return;
+            int limit = textBufferLimit(exec);
+            if(exec.textBuffer.length() >= limit) return;
 
             //this should avoid any garbage allocation
             if(value.isobj){
                 String strValue = toString(value.objval);
 
-                exec.textBuffer.append(strValue, 0, Math.min(strValue.length(), maxTextBuffer - exec.textBuffer.length()));
+                exec.textBuffer.append(strValue, 0, Math.min(strValue.length(), limit - exec.textBuffer.length()));
             }else{
                 //display integer version when possible
                 if(Math.abs(value.numval - Math.round(value.numval)) < 0.00001){
@@ -1095,7 +1100,7 @@ public class LExecutor{
         @Override
         public void run(LExecutor exec){
 
-            if(exec.textBuffer.length() >= maxTextBuffer) return;
+            if(exec.textBuffer.length() >= textBufferLimit(exec)) return;
             if(value.isobj){
                 if(!(value.objval instanceof UnlockableContent cont)) return;
                 exec.textBuffer.append((char)cont.emojiChar());
@@ -1150,8 +1155,8 @@ public class LExecutor{
                 }
             }
 
-            if(exec.textBuffer.length() > maxTextBuffer){
-                exec.textBuffer.setLength(maxTextBuffer);
+            if(exec.textBuffer.length() > textBufferLimit(exec)){
+                exec.textBuffer.setLength(textBufferLimit(exec));
             }
         }
     }
@@ -1171,7 +1176,8 @@ public class LExecutor{
 
             if(target.building() instanceof MessageBuild d && d.isValid() && (exec.privileged || (d.team == exec.team && !d.block.privileged))){
                 d.message.setLength(0);
-                d.message.append(exec.textBuffer, 0, Math.min(exec.textBuffer.length(), ((MessageBlock)d.block).maxTextLength));
+                int len = exec.privileged ? exec.textBuffer.length() : Math.min(exec.textBuffer.length(), ((MessageBlock)d.block).maxTextLength);
+                d.message.append(exec.textBuffer, 0, len);
             }
             exec.textBuffer.setLength(0);
 
@@ -2018,7 +2024,12 @@ public class LExecutor{
         @Override
         public void run(LExecutor exec){
             if(exec.build == null) return;
-            exec.build.ipt = Mathf.clamp(amount.numi(), 1, ((LogicBlock)exec.build.block).maxInstructionsPerTick);
+            int amount = this.amount.numi();
+            if(exec.privileged){
+                exec.build.ipt = Math.max(1, amount);
+            }else{
+                exec.build.ipt = Mathf.clamp(amount, 1, ((LogicBlock)exec.build.block).maxInstructionsPerTick);
+            }
             if(exec.ipt != null){
                 exec.ipt.numval = exec.build.ipt;
             }
@@ -2361,7 +2372,7 @@ public class LExecutor{
 
         @Override
         public void run(LExecutor exec){
-            if(exec.textBuffer.length() >= maxTextBuffer) return;
+            if(exec.textBuffer.length() >= textBufferLimit(exec)) return;
 
             //this should avoid any garbage allocation
             if(name.isobj){
