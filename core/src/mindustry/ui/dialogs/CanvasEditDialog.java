@@ -290,7 +290,6 @@ public class CanvasEditDialog extends BaseDialog{
                         Vec2 s = screenToLocalCoordinates(Core.input.mouse());
                         if(s.x >= 0 && s.y >= 0 && s.x < width && s.y < height){
                             float sx = Mathf.round(s.x, width / size), sy = Mathf.round(s.y, height / size);
-
                             Lines.stroke(Scl.scl(6f));
                             Draw.color(Pal.accent);
                             Lines.rect(sx + x, sy + y, width / size, height / size, Lines.getStroke() - 1f);
@@ -329,9 +328,8 @@ public class CanvasEditDialog extends BaseDialog{
                         Draw.alpha(parentAlpha);
                         //alpha background
                         Tex.alphaBg.draw(x, y, width, height);
-                        //circle fill
                         Draw.color(current);
-                        Fill.circle(x + width/2f, y + height/2f, Math.min(width, height)/2f - 2f);
+                        Fill.crect(x + 2f, y + 2f, width - 4f, height - 4f);
                         Draw.reset();
                     }
                 };
@@ -354,7 +352,7 @@ public class CanvasEditDialog extends BaseDialog{
                         setColor(current.rgba8888(), false);
                     }catch(Exception ignored){
                     }
-                }).width(180f).valid(text -> {
+                }).growX().minWidth(0f).valid(text -> {
                     try{
                         Color.valueOf(text);
                         return true;
@@ -369,17 +367,17 @@ public class CanvasEditDialog extends BaseDialog{
 
                 //RGBA sliders
                 right.add("R").padRight(6f);
-                right.add(rSlider = new Slider(0f, 1f, 1f/255f, false)).width(220f).row();
+                right.add(rSlider = new Slider(0f, 1f, 1f/255f, false)).growX().minWidth(0f).row();
                 right.add("G").padRight(6f);
-                right.add(gSlider = new Slider(0f, 1f, 1f/255f, false)).width(220f).row();
+                right.add(gSlider = new Slider(0f, 1f, 1f/255f, false)).growX().minWidth(0f).row();
                 right.add("B").padRight(6f);
-                right.add(bSlider = new Slider(0f, 1f, 1f/255f, false)).width(220f).row();
+                right.add(bSlider = new Slider(0f, 1f, 1f/255f, false)).growX().minWidth(0f).row();
                 right.add("A").padRight(6f);
-                right.add(aSlider = new Slider(0f, 1f, 1f/255f, false)).width(220f).row();
+                right.add(aSlider = new Slider(0f, 1f, 1f/255f, false)).growX().minWidth(0f).row();
 
                 //brush
                 right.add("@canvas.brushsize").padRight(6f);
-                right.add(brushSlider = new Slider(1f, 8f, 1f, false)).width(220f).row();
+                right.add(brushSlider = new Slider(1f, 8f, 1f, false)).growX().minWidth(0f).row();
 
                 //init slider values + listeners
                 rSlider.setValue(current.r);
@@ -399,7 +397,7 @@ public class CanvasEditDialog extends BaseDialog{
                 bSlider.moved(v -> updateFromSliders.run());
                 aSlider.moved(v -> updateFromSliders.run());
                 brushSlider.moved(v -> brush = (int)v);
-            }).growY().width(320f);
+            }).growY().width(280f);
         }).colspan(3);
 
         cont.row();
