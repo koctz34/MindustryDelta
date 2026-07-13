@@ -37,6 +37,7 @@ public class Binding{
     schematicMenu = KeyBind.add("schematic_menu", KeyCode.t),
 
     commandMode = KeyBind.add("command_mode", KeyCode.shiftLeft, "command"),
+    rotateUnit = KeyBind.add("rotate_unit", KeyCode.altLeft, "command"),
     commandQueue = KeyBind.add("command_queue", KeyCode.mouseMiddle),
     createControlGroup = KeyBind.add("create_control_group", KeyCode.controlLeft),
 

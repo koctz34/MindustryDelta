@@ -993,7 +993,9 @@ public class DesktopInput extends InputHandler{
         }
 
         float mouseAngle = Angles.mouseAngle(unit.x, unit.y);
-        boolean aimCursor = omni && player.shooting && unit.type.hasWeapons() && unit.type.faceTarget && !boosted;
+        boolean rotating = input.keyDown(Binding.rotateUnit);
+        if(rotating) player.shooting = false;
+        boolean aimCursor = rotating || omni && player.shooting && unit.type.hasWeapons() && unit.type.faceTarget && !boosted;
 
         if(aimCursor){
             unit.lookAt(mouseAngle);
@@ -1004,7 +1006,7 @@ public class DesktopInput extends InputHandler{
         unit.movePref(movement);
 
         unit.aim(Core.input.mouseWorld());
-        unit.controlWeapons(true, player.shooting && !boosted);
+        unit.controlWeapons(!rotating, player.shooting && !boosted && !rotating);
 
         player.boosting = Core.input.keyDown(Binding.boost);
         player.mouseX = unit.aimX();

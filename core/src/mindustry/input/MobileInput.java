@@ -66,6 +66,7 @@ public class MobileInput extends InputHandler implements GestureListener{
     public boolean down = false;
     /** Whether manual shooting (point with finger) is enabled. */
     public boolean manualShooting = false;
+    public boolean rotateMode = false;
 
     /** Current thing being shot at. */
     public @Nullable Teamc target;
@@ -313,6 +314,14 @@ public class MobileInput extends InputHandler implements GestureListener{
                     mode = none;
                 }
             }).width(155f).height(48f).margin(12f).checked(b -> commandMode).row();
+
+            t.button("@rotateunit", Icon.right, Styles.clearTogglet, () -> {
+                rotateMode = !rotateMode;
+                if(rotateMode){
+                    commandMode = false;
+                    player.shooting = false;
+                }
+            }).width(155f).height(48f).margin(12f).checked(b -> rotateMode).row();
 
             t.spacerY(() -> showCancel() ? 50f : 0f).row();
 
@@ -789,6 +798,7 @@ public class MobileInput extends InputHandler implements GestureListener{
         if(player.dead()){
             mode = none;
             manualShooting = false;
+            rotateMode = false;
             payloadTarget = null;
         }
 
@@ -1028,7 +1038,8 @@ public class MobileInput extends InputHandler implements GestureListener{
         float speed = unit.speed();
         float range = unit.hasWeapons() ? unit.range() : 0f;
         float mouseAngle = unit.angleTo(unit.aimX(), unit.aimY());
-        boolean aimCursor = omni && player.shooting && type.hasWeapons() && !boosted && type.faceTarget;
+        if(rotateMode) player.shooting = false;
+        boolean aimCursor = rotateMode || omni && player.shooting && type.hasWeapons() && !boosted && type.faceTarget;
 
         if(aimCursor){
             unit.lookAt(mouseAngle);
@@ -1114,7 +1125,7 @@ public class MobileInput extends InputHandler implements GestureListener{
             }
         }
 
-        unit.controlWeapons(player.shooting && !boosted);
+        unit.controlWeapons(player.shooting && !boosted && !rotateMode);
     }
 
     //endregion
