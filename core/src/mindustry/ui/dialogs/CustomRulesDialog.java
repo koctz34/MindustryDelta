@@ -146,6 +146,7 @@ public class CustomRulesDialog extends BaseDialog{
         main.clear();
         main.left().defaults().fillX().left();
         main.row();
+        main.marginRight(25f);
 
         category("waves");
         check("@rules.waves", b -> rules.waves = b, () -> rules.waves);
@@ -253,7 +254,7 @@ public class CustomRulesDialog extends BaseDialog{
 
         category("music");
 
-        Boolp allowMusic = () -> !state.rules.disableMusic;
+        Boolp allowMusic = () -> !rules.disableMusic;
         Func<String, Seq<MusicContainer>> parser = str -> {
             try{
                 return Seq.map(new JsonReader().parse("[" + str + "]").asStringArray(), MusicContainer::new);
@@ -266,13 +267,13 @@ public class CustomRulesDialog extends BaseDialog{
         check("@rules.nomusic", b -> rules.disableMusic = b, () -> rules.disableMusic);
 
         text("@rules.ambientmusic",
-            s -> state.rules.ambientMusic = s.trim().isEmpty() ? null : parser.get(s),
+            s -> rules.ambientMusic = s.trim().isEmpty() ? null : parser.get(s),
             () -> rules.ambientMusic == null ? "" : rules.ambientMusic.toString(", "),
             text -> parser.get(text) != null,
         allowMusic);
 
         text("@rules.darkmusic",
-            s -> state.rules.darkMusic = s.trim().isEmpty() ? null : parser.get(s),
+            s -> rules.darkMusic = s.trim().isEmpty() ? null : parser.get(s),
             () -> rules.darkMusic == null ? "" : rules.darkMusic.toString(", "),
             text -> parser.get(text) != null,
         allowMusic);
