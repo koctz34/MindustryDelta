@@ -1,6 +1,7 @@
 import arc.*;
 import arc.backend.headless.*;
 import arc.files.*;
+import arc.graphics.*;
 import arc.math.geom.*;
 import arc.struct.*;
 import arc.util.*;
@@ -24,6 +25,8 @@ import mindustry.net.*;
 import mindustry.net.Packets.*;
 import mindustry.type.*;
 import mindustry.world.*;
+import mindustry.world.blocks.logic.*;
+import mindustry.world.blocks.logic.CanvasBlock.*;
 import mindustry.world.blocks.payloads.*;
 import mindustry.world.blocks.storage.*;
 import org.json.*;
@@ -390,6 +393,130 @@ public class ApplicationTests{
                 }
             }
         }
+    }
+
+    @Test
+    void canvasDescriptionConfig(){
+        world.loadMap(testMap);
+        state.set(State.playing);
+        state.rules.limitMapArea = false;
+
+        world.tile(0, 0).setBlock(Blocks.canvas, Team.sharded);
+        CanvasBuild source = (CanvasBuild)world.tile(0, 0).build;
+
+        source.configureAny("hello canvas");
+        assertEquals("hello canvas", source.description.toString());
+
+        //paint something so the pixel payload is not all zeroes
+        source.setPixel(3, Color.red.rgba8888());
+        byte[] pixels = source.data.clone();
+
+        //this is what schematics and copying config with F both go through
+        Object config = source.config();
+        assertTrue(config instanceof byte[]);
+
+        world.tile(4, 4).setBlock(Blocks.canvas, Team.sharded);
+        CanvasBuild target = (CanvasBuild)world.tile(4, 4).build;
+        target.configureAny(config);
+
+        assertEquals("hello canvas", target.description.toString(), "description lost through config()");
+        assertArrayEquals(pixels, target.data, "pixels lost through config()");
+
+        //a canvas without a description must keep emitting plain pixel bytes, as before
+        source.configureAny("");
+        assertArrayEquals(pixels, (byte[])source.config());
+    }
+
+    @Test
+    void canvasResize(){
+        world.loadMap(testMap);
+        state.set(State.playing);
+        state.rules.limitMapArea = false;
+
+        CanvasBlock block = (CanvasBlock)Blocks.canvas;
+        int defaultSize = block.canvasSize;
+
+        world.tile(0, 0).setBlock(Blocks.canvas, Team.sharded);
+        CanvasBuild build = (CanvasBuild)world.tile(0, 0).build;
+        assertEquals(defaultSize, build.canvasSize, "a fresh canvas should start at the block default");
+
+        //mark a pixel so we can find where it lands after resizing
+        int marker = Color.red.rgba8888();
+        build.setPixel(0, marker);
+        assertEquals(marker, (int)(long)(double)build.getPixel(0));
+
+        //grow: the old image stays centered at its original scale
+        int grown = defaultSize + 8;
+        build.resizeCanvas(grown);
+        assertEquals(grown, build.canvasSize);
+        assertEquals(grown * grown * 4, build.data.length);
+
+        int offset = (grown - defaultSize) / 2;
+        assertEquals(marker, (int)(long)(double)build.getPixel(offset * grown + offset), "image was not centered after growing");
+
+        //the resolution must survive config(), which is what schematics and F-copy use
+        Object config = build.config();
+        world.tile(20, 20).setBlock(Blocks.canvas, Team.sharded);
+        CanvasBuild pasted = (CanvasBuild)world.tile(20, 20).build;
+        pasted.configureAny(config);
+
+        assertEquals(grown, pasted.canvasSize, "resolution lost through config()");
+        assertArrayEquals(build.data, pasted.data, "pixels lost through config()");
+
+        //and through a save/load round trip
+        CanvasBuild reloaded = writeReadBuild(build);
+        assertEquals(grown, reloaded.canvasSize, "resolution lost through save");
+        assertArrayEquals(build.data, reloaded.data, "pixels lost through save");
+
+        //shrinking crops around the centre rather than the corner
+        build.resizeCanvas(4);
+        assertEquals(4, build.canvasSize);
+        assertEquals(4 * 4 * 4, build.data.length);
+
+        //out of range values are rejected outright
+        build.resizeCanvas(0);
+        assertEquals(4, build.canvasSize);
+        build.resizeCanvas(block.maxCanvasSize + 1);
+        assertEquals(4, build.canvasSize);
+    }
+
+    @Test
+    void canvasLegacySaveKeepsBlockResolution(){
+        world.loadMap(testMap);
+        state.set(State.playing);
+        state.rules.limitMapArea = false;
+
+        CanvasBlock block = (CanvasBlock)Blocks.canvas;
+
+        world.tile(0, 0).setBlock(Blocks.canvas, Team.sharded);
+        CanvasBuild build = (CanvasBuild)world.tile(0, 0).build;
+        build.setPixel(5, Color.green.rgba8888());
+        byte[] pixels = build.data.clone();
+
+        //emulate a canvas saved before resizing existed: revision 1, no stored resolution
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Writes write = new Writes(new DataOutputStream(out));
+        write.i(pixels.length);
+        write.b(pixels);
+        write.i(0); //empty description
+
+        world.tile(20, 20).setBlock(Blocks.canvas, Team.sharded);
+        CanvasBuild loaded = (CanvasBuild)world.tile(20, 20).build;
+        loaded.read(new Reads(new DataInputStream(new ByteArrayInputStream(out.toByteArray()))), (byte)1);
+
+        assertEquals(block.canvasSize, loaded.canvasSize, "an old canvas must keep the resolution it was drawn at");
+        assertArrayEquals(pixels, loaded.data);
+    }
+
+    /** Round-trips a canvas through its own write/read at the current revision. */
+    CanvasBuild writeReadBuild(CanvasBuild source){
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        source.write(new Writes(new DataOutputStream(out)));
+
+        world.tile(30, 30).setBlock(source.block, Team.sharded);
+        CanvasBuild target = (CanvasBuild)world.tile(30, 30).build;
+        target.read(new Reads(new DataInputStream(new ByteArrayInputStream(out.toByteArray()))), source.version());
+        return target;
     }
 
     @Test

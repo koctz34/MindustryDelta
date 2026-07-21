@@ -708,9 +708,11 @@ public abstract class InputHandler implements InputProcessor, GestureListener{
         if(build == null) return;
 
         // Delta clients sync canvas truecolor via delta-canvas; legacy config would quantize colors.
+        // Extended payloads (pixels + description, from schematics/config copying) must still pass through.
         if(net.server() && player != null && player.con != null && player.con.deltaClient
         && value instanceof byte[] bytes && build.block instanceof CanvasBlock block
-        && block.trueColor && bytes.length != block.canvasSize * block.canvasSize * 4){
+        && block.trueColor && block.sizeOfPayload(bytes.length) <= 0
+        && block.readConfig(bytes) == null){
             return;
         }
 

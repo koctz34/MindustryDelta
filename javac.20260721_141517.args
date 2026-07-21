@@ -1,0 +1,10 @@
+-nowarn
+-proc:none
+-d
+C:/Users/koctz34/AppData/Local/Temp/outcheck
+-cp
+core/build/classes/java/main;/c/Users/koctz34/.gradle/caches/modules-2/files-2.1/com.github.Anuken.Arc/arc-core/231e4dffc9/902516cb98ff37ede7c8fc31daf7010840b293f1/arc-core-231e4dffc9.jar
+-sourcepath
+core/src;core/build/generated/sources/annotationProcessor/java/main
+core/src/mindustry/world/blocks/logic/CanvasBlock.java
+core/src/mindustry/ui/dialogs/CanvasEditDialog.java

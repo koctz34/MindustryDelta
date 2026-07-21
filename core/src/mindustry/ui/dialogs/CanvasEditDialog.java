@@ -1,6 +1,7 @@
 package mindustry.ui.dialogs;
 
 import arc.*;
+import arc.Input.*;
 import arc.files.*;
 import arc.func.*;
 import arc.graphics.*;
@@ -12,6 +13,7 @@ import arc.scene.*;
 import arc.scene.event.*;
 import arc.scene.style.*;
 import arc.scene.ui.*;
+import arc.scene.ui.TextField.*;
 import arc.scene.ui.layout.*;
 import arc.struct.*;
 import arc.util.*;
@@ -28,6 +30,7 @@ public class CanvasEditDialog extends BaseDialog{
     static final String customPaletteKey = "canvas-custom-palette";
     static final String layoutKey = "canvas-layout";
     static final int maxHistory = 10;
+    static final float minUiScale = 0.5f, maxUiScale = 2f;
     static Pixmap clipboard;
     static Texture clipboardTexture;
 
@@ -57,6 +60,8 @@ public class CanvasEditDialog extends BaseDialog{
     float toolsX, toolsY, bodyX, bodyY, controlsX, controlsY, gridX, gridY, paletteX, paletteY;
     float oldToolsX, oldToolsY, oldBodyX, oldBodyY, oldControlsX, oldControlsY, oldGridX, oldGridY, oldPaletteX, oldPaletteY;
     boolean oldToolsVertical;
+    /** Scale applied to every canvas panel, adjustable in layout editing mode. */
+    float uiScale = 1f, oldUiScale = 1f;
     Table toolsPanel, bodyPanel, controlsPanel, gridPanel, palettePanel;
 
     enum CanvasTool{
@@ -72,8 +77,8 @@ public class CanvasEditDialog extends BaseDialog{
         titleTable.remove();
         this.canvas = canvas;
         block = (CanvasBlock)canvas.block;
-        int size = block.canvasSize;
-        pix = block.makePixmap(canvas.data, new Pixmap(size, size));
+        int size = canvas.canvasSize;
+        pix = block.makePixmap(canvas.data, new Pixmap(size, size), size);
         texture = new Texture(pix);
         curColor = block.palette[0];
         current.set(curColor);
@@ -130,12 +135,13 @@ public class CanvasEditDialog extends BaseDialog{
                 boolean dragging, movingPaste;
                 IntSeq stack = new IntSeq();
 
+                //the canvas can be resized while this dialog is open, so always read the live pixmap resolution
                 int convertX(float ex){
-                    return (int)((ex) / (width / size));
+                    return (int)((ex) / (width / pix.width));
                 }
 
                 int convertY(float ey){
-                    return pix.height - 1 - (int)((ey) / (height / size));
+                    return pix.height - 1 - (int)((ey) / (height / pix.height));
                 }
 
                 {
@@ -260,6 +266,8 @@ public class CanvasEditDialog extends BaseDialog{
 
                 @Override
                 public void draw(){
+                    int size = pix.width;
+
                     Tmp.tr1.set(texture);
                     Draw.alpha(parentAlpha);
                     Draw.rect(Tmp.tr1, x + width/2f, y + height/2f, width, height);
@@ -406,7 +414,8 @@ public class CanvasEditDialog extends BaseDialog{
             gridPanel = t;
             t.defaults().size(44f);
             t.button(Icon.grid, Styles.clearNoneTogglei, () -> grid = !grid).checked(grid).disabled(b -> layoutEditing).row();
-            t.button(Icon.edit, Styles.clearNoneTogglei, this::beginLayoutEdit).checked(b -> layoutEditing).tooltip("@canvas.layoutedit");
+            t.button(Icon.edit, Styles.clearNoneTogglei, this::beginLayoutEdit).checked(b -> layoutEditing).tooltip("@canvas.layoutedit").row();
+            t.button(Icon.image, Styles.clearNonei, this::showResizeDialog).disabled(b -> layoutEditing).tooltip("@canvas.resize");
         });
 
         // Palette with persistent custom colors.
@@ -504,6 +513,16 @@ public class CanvasEditDialog extends BaseDialog{
         nextToolCell();
         toolsPanel.button(Icon.cancel, Styles.clearNonei, this::cancelPaste).visible(() -> paste != null).disabled(b -> layoutEditing).tooltip("@canvas.cancel");
         nextToolCell();
+        toolsPanel.button(Icon.flipX, Styles.clearNonei, this::mirrorCanvas).disabled(b -> layoutEditing).tooltip("@canvas.mirror");
+        nextToolCell();
+        toolsPanel.button(Icon.rotate, Styles.clearNonei, () -> rotateCanvas(false)).disabled(b -> layoutEditing).tooltip("@canvas.rotateleft").update(i -> {
+            var img = i.getCells().first().get();
+            img.setScale(-1f, 1f);
+            img.setTranslation(img.getWidth(), 0f);
+        });
+        nextToolCell();
+        toolsPanel.button(Icon.rotate, Styles.clearNonei, () -> rotateCanvas(true)).disabled(b -> layoutEditing).tooltip("@canvas.rotateright");
+        nextToolCell();
 
         toolsPanel.button(Icon.move, Styles.clearNonei, () -> {
             toolsVertical = !toolsVertical;
@@ -560,10 +579,52 @@ public class CanvasEditDialog extends BaseDialog{
             buttons.button("@cancel", Icon.cancel, this::cancelLayoutEdit);
             buttons.row();
             buttons.button("@settings.resetKey", Icon.refresh, this::resetLayout).colspan(2).growX();
+            buttons.row();
+            buttons.table(t -> {
+                t.add("@canvas.uiscale").padRight(6f);
+                t.slider(minUiScale, maxUiScale, 0.05f, uiScale, value -> {
+                    uiScale = value;
+                    applyLayout();
+                }).growX().minWidth(160f);
+                t.label(() -> (int)(uiScale * 100f) + "%").width(70f).padLeft(6f).right();
+            }).colspan(2).growX().height(64f);
         }else{
             buttons.button("@back", Icon.left, this::hide);
             buttons.button("@import", Icon.image, () -> FileChooser.open("png").submit(this::importFrom));
             buttons.button("@export", Icon.export, () -> FileChooser.export("canvas", "png", this::exportTo));
+            buttons.button("@edit", Icon.pencil, this::editDescription);
+        }
+    }
+
+    void editDescription(){
+        CanvasBuild build = canvas;
+        int max = block.maxDescriptionLength;
+
+        if(mobile){
+            Core.input.getTextInput(new TextInput(){{
+                text = build.description.toString();
+                multiline = true;
+                maxLength = max;
+                accepted = str -> {
+                    if(!str.contentEquals(build.description)) build.configure(str);
+                };
+            }});
+        }else{
+            BaseDialog dialog = new BaseDialog("@canvas.editdescription");
+            dialog.setFillParent(false);
+            TextArea area = dialog.cont.add(new TextArea(build.description.toString().replace("\r", "\n"))).size(420f, 220f).get();
+            area.setMaxLength(max);
+            dialog.cont.row();
+            dialog.cont.label(() -> area.getText().length() + " / " + max).color(Color.lightGray);
+            dialog.buttons.button("@ok", () -> {
+                if(!area.getText().contentEquals(build.description)) build.configure(area.getText());
+                dialog.hide();
+            }).size(130f, 60f);
+            dialog.update(() -> {
+                if(!build.isValid()) dialog.hide();
+            });
+            dialog.closeOnBack();
+            dialog.show();
         }
     }
 
@@ -595,6 +656,7 @@ public class CanvasEditDialog extends BaseDialog{
         paletteX = oldPaletteX;
         paletteY = oldPaletteY;
         toolsVertical = oldToolsVertical;
+        uiScale = oldUiScale;
         layoutEditing = false;
         applyLayout();
         rebuildButtons();
@@ -604,7 +666,9 @@ public class CanvasEditDialog extends BaseDialog{
     void resetLayout(){
         toolsX = toolsY = bodyX = bodyY = controlsX = controlsY = gridX = gridY = paletteX = paletteY = 0f;
         toolsVertical = false;
+        uiScale = 1f;
         applyLayout();
+        rebuildButtons();
         rebuildTools();
     }
 
@@ -620,6 +684,7 @@ public class CanvasEditDialog extends BaseDialog{
         oldPaletteX = paletteX;
         oldPaletteY = paletteY;
         oldToolsVertical = toolsVertical;
+        oldUiScale = uiScale;
     }
 
     void loadLayout(){
@@ -634,6 +699,7 @@ public class CanvasEditDialog extends BaseDialog{
         paletteX = Core.settings.getFloat(layoutKey + "-palette-x", 0f);
         paletteY = Core.settings.getFloat(layoutKey + "-palette-y", 0f);
         toolsVertical = Core.settings.getBool(layoutKey + "-tools-vertical", false);
+        uiScale = Mathf.clamp(Core.settings.getFloat(layoutKey + "-ui-scale", 1f), minUiScale, maxUiScale);
     }
 
     void saveLayout(){
@@ -648,6 +714,7 @@ public class CanvasEditDialog extends BaseDialog{
         Core.settings.put(layoutKey + "-palette-x", paletteX);
         Core.settings.put(layoutKey + "-palette-y", paletteY);
         Core.settings.put(layoutKey + "-tools-vertical", toolsVertical);
+        Core.settings.put(layoutKey + "-ui-scale", uiScale);
         Core.settings.manualSave();
     }
 
@@ -713,15 +780,24 @@ public class CanvasEditDialog extends BaseDialog{
     }
 
     void applyLayout(){
-        setPanelTranslation(toolsPanel, toolsX, toolsY);
-        setPanelTranslation(bodyPanel, bodyX, bodyY);
-        setPanelTranslation(controlsPanel, controlsX, controlsY);
-        setPanelTranslation(gridPanel, gridX, gridY);
-        setPanelTranslation(palettePanel, paletteX, paletteY);
+        setPanelTransform(toolsPanel, toolsX, toolsY);
+        setPanelTransform(bodyPanel, bodyX, bodyY);
+        setPanelTransform(controlsPanel, controlsX, controlsY);
+        setPanelTransform(gridPanel, gridX, gridY);
+        setPanelTransform(palettePanel, paletteX, paletteY);
     }
 
-    void setPanelTranslation(@Nullable Element element, float x, float y){
-        if(element != null) element.setTranslation(x, y);
+    void setPanelTransform(@Nullable Element element, float x, float y){
+        if(element == null) return;
+
+        element.setTranslation(x, y);
+        //origin stays at the bottom-left corner so scaling never fights the drag offset above
+        element.setOrigin(0f, 0f);
+        element.setScale(uiScale);
+
+        //a group only honours its own scale while transforming, but transforming costs a batch flush per frame,
+        //so it is left off at 1x where it would change nothing
+        if(element instanceof Group group) group.setTransform(!Mathf.equal(uiScale, 1f));
     }
 
     @Override
@@ -778,6 +854,111 @@ public class CanvasEditDialog extends BaseDialog{
         }catch(Exception e){
             ui.showException("@editor.errorload", e);
         }
+    }
+
+    void showResizeDialog(){
+        BaseDialog dialog = new BaseDialog("@canvas.resize");
+        dialog.setFillParent(false);
+
+        int min = block.minCanvasSize, max = block.maxCanvasSize;
+        int[] value = {pix.width};
+
+        dialog.cont.add("@canvas.resolution").padRight(6f);
+        TextField field = dialog.cont.field(String.valueOf(value[0]), text -> {
+            value[0] = Strings.parseInt(text, -1);
+        }).valid(text -> {
+            int parsed = Strings.parseInt(text, -1);
+            return parsed >= min && parsed <= max;
+        }).width(120f).get();
+        field.setFilter(TextFieldFilter.digitsOnly);
+        field.setMaxLength(String.valueOf(max).length());
+
+        dialog.cont.row();
+        dialog.cont.add(Core.bundle.format("canvas.resolutionrange", min, max)).color(Color.lightGray).colspan(2).padTop(4f).row();
+        dialog.cont.add("@canvas.resizewarn").color(Pal.accent).wrap().width(420f).colspan(2).padTop(10f).labelAlign(Align.center);
+
+        dialog.buttons.button("@cancel", Icon.cancel, dialog::hide).size(130f, 60f);
+        dialog.buttons.button("@confirm", Icon.ok, () -> {
+            int next = value[0];
+            if(next < min || next > max) return;
+            dialog.hide();
+            resizeCanvas(next);
+        }).size(130f, 60f).disabled(b -> value[0] < min || value[0] > max);
+
+        dialog.update(() -> {
+            if(!canvas.isValid()) dialog.hide();
+        });
+        dialog.closeOnBack();
+        dialog.show();
+    }
+
+    void resizeCanvas(int newSize){
+        if(newSize == pix.width) return;
+
+        //flush pending strokes first, so nothing drawn since the last autosave is lost by the swap below
+        save();
+
+        Pixmap next = new Pixmap(newSize, newSize);
+        //a positive offset pads the image, a negative one crops it — either way the old content stays centered
+        int offset = (newSize - pix.width) / 2;
+        for(int x = 0; x < pix.width; x++){
+            int nx = x + offset;
+            if(nx < 0 || nx >= newSize) continue;
+
+            for(int y = 0; y < pix.height; y++){
+                int ny = y + offset;
+                if(ny < 0 || ny >= newSize) continue;
+
+                next.setRaw(nx, ny, pix.getRaw(x, y));
+            }
+        }
+
+        //push resolution and pixels together, so peers adopt both in one config instead of replicating the centering
+        canvas.configure(block.packConfig(canvas.packPixmap(next, newSize), newSize, canvas.description.toString()));
+
+        pix.dispose();
+        texture.dispose();
+        pix = next;
+        texture = new Texture(pix);
+
+        //history holds pixmaps of the old resolution, which can no longer be applied to this canvas
+        clearHistory(undoStack);
+        clearHistory(redoStack);
+        cancelPaste();
+        modified = false;
+    }
+
+    void mirrorCanvas(){
+        beginAction();
+        int size = pix.width;
+        Pixmap copy = copyPixmap(pix);
+        for(int x = 0; x < size; x++){
+            for(int y = 0; y < size; y++){
+                pix.setRaw(x, y, copy.getRaw(size - 1 - x, y));
+            }
+        }
+        copy.dispose();
+
+        texture.draw(pix);
+        actionChanged = true;
+        finishAction();
+    }
+
+    void rotateCanvas(boolean clockwise){
+        beginAction();
+        int size = pix.width;
+        Pixmap copy = copyPixmap(pix);
+        for(int x = 0; x < size; x++){
+            for(int y = 0; y < size; y++){
+                int color = clockwise ? copy.getRaw(y, size - 1 - x) : copy.getRaw(size - 1 - y, x);
+                pix.setRaw(x, y, color);
+            }
+        }
+        copy.dispose();
+
+        texture.draw(pix);
+        actionChanged = true;
+        finishAction();
     }
 
     void selectTool(CanvasTool next){

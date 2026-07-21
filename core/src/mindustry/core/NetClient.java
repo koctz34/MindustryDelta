@@ -140,8 +140,8 @@ public class NetClient implements ApplicationListener{
                 var build = world.build(pos);
                 if(build instanceof mindustry.world.blocks.logic.CanvasBlock.CanvasBuild canvas){
                     var block = (mindustry.world.blocks.logic.CanvasBlock)canvas.block;
-                    int expected = block.canvasSize * block.canvasSize * 4;
-                    if(block.trueColor && rgba.length == expected){
+                    //canvases are individually resizable, so accept any valid square resolution rather than the block default
+                    if(block.trueColor && block.sizeOfPayload(rgba.length) > 0){
                         canvas.applyTrueColor(rgba);
                     }
                 }
